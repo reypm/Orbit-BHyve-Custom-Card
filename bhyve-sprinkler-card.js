@@ -593,13 +593,7 @@
         controller_name:  'Smart Controller',
         zones:            [],
         columns:          2,
-        show_next_run:    true,
-        show_health:      true,
         show_actions:     true,
-        battery_entity:   '',
-        rain_delay_entity:'',
-        next_run_entity:  '',
-        hub_entity:       '',
         schedule_days:    [],
         schedule_time:    '06:00',
       };
@@ -608,18 +602,13 @@
     setConfig(config) {
       if (!config) throw new Error('[bhyve-sprinkler-card] Invalid configuration.');
       this._config = {
-        title:                'BHyve Sprinkler',
-        controller_name:      'Smart Controller',
-        zones:                [],
-        columns:              2,
-        show_next_run:        true,
-        show_health:          true,
-        show_actions:         true,
-        hub_entity:        '',
-        show_hub:          false,
-        rain_delay_entity: '',
-        schedule_days:     [],
-        schedule_time:     '06:00',
+        title:            'BHyve Sprinkler',
+        controller_name:  'Smart Controller',
+        zones:            [],
+        columns:          2,
+        show_actions:     true,
+        schedule_days:    [],
+        schedule_time:    '06:00',
         ...config,
       };
       if (this._hass) this._render();
@@ -845,8 +834,7 @@
       const zs = c.zones || [];
 
       const active = zs.filter(z => this._isOn(z.entity)).length;
-      const hasRainDelay = this._isOn(c.rain_delay_entity) ||
-        zs.some(z => z.rain_delay_entity && this._isOn(z.rain_delay_entity));
+      const hasRainDelay = zs.some(z => z.rain_delay_entity && this._isOn(z.rain_delay_entity));
 
       const activeZones = zs.filter(z => this._isOn(z.entity));
       let statusClass = 'idle', statusText = 'All idle';
@@ -866,9 +854,7 @@
           <div class="status-bar ${statusClass}"></div>
           ${this._tplHeader(c, statusClass, statusText, activeZones.length)}
           ${this._tplZones(zs, c.columns || 2, c, hasRainDelay)}
-          ${c.show_hub      !== false ? this._tplHub(c) : ''}
-          ${c.show_health   !== false ? this._tplHealth(c) : ''}
-          ${c.show_actions  !== false ? this._tplActions(zs, hasRainDelay, c) : ''}
+          ${c.show_actions !== false ? this._tplActions(zs) : ''}
         </ha-card>
       `;
 
@@ -1289,9 +1275,7 @@
       `;
     }
 
-    _tplActions(zones, hasRainDelay, c) {
-      const hasRainEntity = !!c.rain_delay_entity ||
-        (zones||[]).some(z=>!!z.rain_delay_entity);
+    _tplActions() {
       return `
         <div class="actions-row">
           <button class="action-btn primary" data-action="run-all">
@@ -1300,11 +1284,6 @@
           <button class="action-btn" data-action="pause-all">
             <ha-icon icon="mdi:stop-circle-outline"></ha-icon> Stop all
           </button>
-          ${hasRainEntity ? `
-            <button class="action-btn ${hasRainDelay ? 'rain-active' : ''}" data-action="toggle-rain">
-              <ha-icon icon="mdi:weather-rainy"></ha-icon>
-              ${hasRainDelay ? 'Cancel delay' : 'Rain delay'}
-            </button>` : ''}
         </div>
       `;
     }
@@ -1370,18 +1349,6 @@
             zones.forEach(z => this._runZone(z.entity, z.run_time || 10));
           } else if (action === 'pause-all') {
             zones.forEach(z => this._stopZone(z.entity));
-          } else if (action === 'toggle-rain') {
-            const rde = this._config.rain_delay_entity ||
-              this._config.zones?.map(z=>z.rain_delay_entity).find(Boolean)||'';
-            if (!rde) return;
-            const isActive = this._isOn(rde);
-            if (this._hass?.services?.bhyve?.disable_rain_delay && isActive) {
-              this._svc('bhyve', 'disable_rain_delay', { entity_id: rde });
-            } else if (this._hass?.services?.bhyve?.enable_rain_delay && !isActive) {
-              this._svc('bhyve', 'enable_rain_delay',  { entity_id: rde, hours: 24 });
-            } else {
-              this._svc('homeassistant', 'toggle', { entity_id: rde });
-            }
           }
         });
       });
@@ -1573,77 +1540,11 @@
           </button>
         </div>
 
-        <!-- ── Wi-Fi Hub ── -->
-        <div class="editor-section">
-          <div class="editor-section-title">Wi-Fi hub</div>
-          <div class="field-row">
-            <span class="field-label">Hub entity <span class="field-optional">(optional)</span></span>
-            <ha-selector id="hub-sel"></ha-selector>
-            <span class="field-hint">Binary sensor or device reporting hub online / offline status</span>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show Wi-Fi hub section</span>
-            <label class="toggle-switch">
-              <input type="checkbox" data-key="show_hub" ${c.show_hub !== false ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-        </div>
-
-        <!-- ── Rain delay entity (card-level fallback) ── -->
-        <div class="editor-section">
-          <div class="editor-section-title">Rain delay <span style="font-size:11px;font-weight:400;opacity:.6">(card-level fallback)</span></div>
-          <div class="field-row">
-            <span class="field-label">Default rain delay entity</span>
-            <ha-selector id="rain-delay-sel"></ha-selector>
-            <span class="field-hint">Used for zones without a per-zone rain delay entity set</span>
-          </div>
-        </div>
-
-        <!-- ── Device health entities ── -->
-        <div class="editor-section">
-          <div class="editor-section-title">Device health</div>
-          <div class="field-row">
-            <span class="field-label">Battery level sensor <span class="field-optional">(optional)</span></span>
-            <ha-selector id="battery-sel"></ha-selector>
-            <span class="field-hint">Sensor reporting battery % — shows colour-coded chip</span>
-          </div>
-
-          <div class="toggle-row">
-            <span class="toggle-label">Show battery chip</span>
-            <label class="toggle-switch">
-              <input type="checkbox" data-key="show_health_battery" ${c.show_health_battery !== false ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show last-seen chip</span>
-            <label class="toggle-switch">
-              <input type="checkbox" data-key="show_health_last_seen" ${c.show_health_last_seen !== false ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show zone count chip</span>
-            <label class="toggle-switch">
-              <input type="checkbox" data-key="show_health_zones" ${c.show_health_zones !== false ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show device health section</span>
-            <label class="toggle-switch">
-              <input type="checkbox" data-key="show_health" ${c.show_health !== false ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-        </div>
-
         <!-- ── Action buttons ── -->
         <div class="editor-section">
           <div class="editor-section-title">Action buttons</div>
           <div class="toggle-row">
-            <span class="toggle-label">Show action buttons (Run all, Pause, Rain delay)</span>
+            <span class="toggle-label">Show action buttons (Run all, Stop all)</span>
             <label class="toggle-switch">
               <input type="checkbox" data-key="show_actions" ${c.show_actions !== false ? 'checked' : ''}>
               <span class="toggle-slider"></span>
@@ -1674,20 +1575,6 @@
         el.value    = value || '';
         el.label    = label || '';
       };
-
-      // Main entity selectors — selector restricts to sensible domains
-      init(root.getElementById('rain-delay-sel'),
-        { entity: { domain: ['binary_sensor', 'switch'] } },
-        c.rain_delay_entity, 'Rain delay entity');
-
-
-      init(root.getElementById('battery-sel'),
-        { entity: { domain: 'sensor', device_class: 'battery' } },
-        c.battery_entity, 'Battery level sensor');
-
-      init(root.getElementById('hub-sel'),
-        { entity: {} },
-        c.hub_entity, 'Hub entity');
 
       // Zone entity selectors
       root.querySelectorAll('.zone-sel').forEach(sel => {
@@ -1749,17 +1636,6 @@
       // Boolean toggles
       root.querySelectorAll('input[type="checkbox"][data-key]').forEach(cb =>
         cb.addEventListener('change', () => this._patch(cb.dataset.key, cb.checked)));
-
-      // Main entity selectors (ha-selector fires value-changed with e.detail.value)
-      const selMap = {
-        'rain-delay-sel': 'rain_delay_entity',
-        'battery-sel':    'battery_entity',
-        'hub-sel':        'hub_entity',
-      };
-      Object.entries(selMap).forEach(([id, key]) => {
-        const el = root.getElementById(id);
-        if (el) el.addEventListener('value-changed', e => this._patch(key, e.detail?.value ?? ''));
-      });
 
       // Zone Wi-Fi hub selectors
       root.querySelectorAll('.zone-hub-sel').forEach(sel =>

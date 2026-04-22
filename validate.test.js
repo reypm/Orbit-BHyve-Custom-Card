@@ -91,18 +91,14 @@ try {
 
 // Defaults applied
 card.setConfig({ zones: [] });
-assert(card._config.title           === 'BHyve Sprinkler', 'default title applied');
-assert(card._config.columns         === 2,                 'default columns applied');
-assert(card._config.show_next_run   === true,              'default show_next_run applied');
-assert(card._config.show_health     === true,              'default show_health applied');
-assert(card._config.show_actions    === true,              'default show_actions applied');
+assert(card._config.title        === 'BHyve Sprinkler', 'default title applied');
+assert(card._config.columns      === 2,                 'default columns applied');
+assert(card._config.show_actions === true,              'default show_actions applied');
 
 // ── 5. getStubConfig() — ships blank ──────────────────────────────────────
 process.stdout.write('\n[5] getStubConfig()\n');
 const stub = Card.getStubConfig();
 assert(stub.zones.length === 0,          'ships with no zones by default');
-assert(stub.battery_entity    === '',    'battery_entity empty by default');
-assert(stub.rain_delay_entity === '',    'rain_delay_entity empty by default');
 assert(stub.title === 'BHyve Sprinkler', 'default title set');
 assert(stub.columns === 2,               'default columns = 2');
 
@@ -519,24 +515,14 @@ process.stdout.write('\n[17] zone meta badges\n');
 process.stdout.write('\n[18] actions row\n');
 {
   const c10 = new Card();
-  c10.setConfig({ zones: [], rain_delay_entity: 'switch.rain' });
-  const actWith = c10._tplActions([], false, c10._config);
+  c10.setConfig({ zones: [] });
+  const actWith = c10._tplActions();
   assert(actWith.includes('Run all'),           'Run all button present');
-  assert(actWith.includes('Stop all'),          'Stop all button present (renamed from Pause all)');
+  assert(actWith.includes('Stop all'),          'Stop all button present');
   assert(!actWith.includes('Pause all'),        'Pause all text removed');
-  assert(actWith.includes('Rain delay'),        'Rain delay button present when entity configured');
+  assert(!actWith.includes('Rain delay'),       'Rain delay button not in actions (zone-only)');
   assert(actWith.includes('data-action="run-all"'),   'run-all action attribute set');
   assert(actWith.includes('data-action="pause-all"'), 'pause-all action attribute set internally');
-
-  // No rain entity → no rain delay button
-  c10.setConfig({ zones: [] });
-  const actNoRain = c10._tplActions([], false, c10._config);
-  assert(!actNoRain.includes('Rain delay'),     'rain delay button absent when no rain entity');
-
-  // Rain delay active → Cancel delay text
-  c10.setConfig({ zones: [], rain_delay_entity: 'switch.rain' });
-  const actRainOn = c10._tplActions([], true, c10._config);
-  assert(actRainOn.includes('Cancel delay'),    'Cancel delay shown when rain delay active');
 }
 
 // ── 19. Config defaults ─────────────────────────────────────────
@@ -544,10 +530,6 @@ process.stdout.write('\n[19] config defaults\n');
 {
   const c11 = new Card();
   c11.setConfig({ zones: [] });
-  assert(c11._config.show_sprinkler_type !== false, 'show_sprinkler_type defaults to true');
-  assert(c11._config.show_smart_watering !== false, 'show_smart_watering defaults to true');
-  assert(c11._config.show_programs       !== false, 'show_programs defaults to true');
-  assert(c11._config.show_hub            === false, 'show_hub defaults to false (per-zone preferred)');
   assert(Array.isArray(c11._config.schedule_days),  'schedule_days defaults to array');
   assert(c11._config.schedule_time === '06:00',      'schedule_time defaults to 06:00');
 }
@@ -590,8 +572,6 @@ process.stdout.write('\n[20] editor program_entities\n');
 
   // bhyve services used
   assert(code.includes('stop_watering'),     'bhyve.stop_watering service used');
-  assert(code.includes('enable_rain_delay'), 'bhyve.enable_rain_delay service used');
-  assert(code.includes('disable_rain_delay'),'bhyve.disable_rain_delay service used');
 }
 
 
@@ -854,13 +834,9 @@ process.stdout.write('\n[25] per-zone schedule, display toggles, rain delay\n');
   assert(!code.includes('data-key="show_sprinkler_type"'), 'global show_sprinkler_type toggle removed');
   assert(!code.includes('data-key="show_programs"'),       'global show_programs toggle removed');
 
-  // --- hasRainDelay includes per-zone entities ---
+  // --- hasRainDelay uses per-zone entities only ---
   assert(code.includes("zs.some(z => z.rain_delay_entity && this._isOn(z.rain_delay_entity))"),
-         'hasRainDelay checks per-zone rain_delay_entity');
-
-  // --- Global actions shows rain button when any zone has rain entity ---
-  assert(code.includes("(zones||[]).some(z=>!!z.rain_delay_entity)"),
-         '_tplActions shows rain button when zones have rain entity');
+         'hasRainDelay checks per-zone rain_delay_entity only');
 }
 
 // ── 26. smart_watering_entity toggle ────────────────────────────

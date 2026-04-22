@@ -16,8 +16,8 @@ A custom Lovelace card for [Orbit BHyve](https://bhyve.orbitonline.com/) smart s
 - **Program-aware next run** — reads `program_a/b/c/e` start times and frequency directly from zone switch attributes; calculates the exact next scheduled run across all enabled programs, including the "all runs passed today → next week" case
 - **Smart watering toggle** — point `smart_watering_entity` at the zone's smart watering switch (e.g. `switch.timer_zone_1_inside_smart_watering`) to get a live on/off toggle in the Settings section
 - **Programs with on/off toggles** — configure `program_entities` per zone to enable real-time program switching; falls back to read-only display from zone switch attributes when not set
-- **Per-zone everything** — schedule (days + start time), rain delay entity, display options, hub, battery, smart watering, and programs are all configured independently per zone with card-level fallbacks
-- **Uses BHyve services** — `bhyve.start_watering`, `bhyve.stop_watering`, `bhyve.enable_rain_delay`, `bhyve.disable_rain_delay` called automatically; falls back to generic HA services
+- **Per-zone everything** — Wi-Fi hub, battery, health chips, rain delay, schedule, smart watering, and programs are all configured independently per zone with card-level schedule fallbacks
+- **Uses BHyve services** — `bhyve.start_watering`, `bhyve.stop_watering` called automatically; falls back to generic HA services
 - **Smart status badge** — header shows running zone name, "N zones running", "Rain delay", or "All idle"
 - **Optimistic UI** — all toggles and Run/Stop update instantly before HA confirms; handles `switch` and `valve` domains
 - **1 or 2-column layout** — configurable per card
@@ -60,10 +60,10 @@ Each zone card contains these sections in order:
 |---|---|
 | **Header** | `Zone name \| Status` on the left, Run/Stop toggle button on the right |
 | **Timer bar** | 3 px progress bar (visible while running) |
-| **Wi-Fi hub** | Hub entity name + Online/Offline state |
+| **Wi-Fi hub** | Hub entity name + Online/Offline state (when `hub_entity` is set) |
 | **Programs** | List of watering programs with on/off pill toggles and schedule details |
 | **Settings** | Smart watering entity toggle (when `smart_watering_entity` is set) |
-| **Health** | Battery % (colour-coded) and Last seen chips |
+| **Health** | Battery % (colour-coded) and Last seen chips (when `battery_entity` is set) |
 | **Footer** | Next scheduled run date/time with program name + rain delay pill |
 
 ---
@@ -78,8 +78,7 @@ title: BHyve Sprinkler        # default: "BHyve Sprinkler"
 controller_name: Front Yard   # default: "Smart Controller"
 columns: 1                    # 1 or 2 column zone grid, default: 2
 
-# Card-level fallbacks (used when a zone has no per-zone value set)
-rain_delay_entity: binary_sensor.bhyve_rain_delay
+# Card-level schedule fallback (used when a zone has no per-zone schedule set)
 schedule_days: [2]            # 0=Sun … 6=Sat
 schedule_time: '06:00'
 
@@ -112,6 +111,17 @@ zones:
     rain_delay_entity: binary_sensor.timer_zone_2_outside_rain_delay
 ```
 
+### Card-level fields
+
+| Field | Description |
+|---|---|
+| `title` | Card title (default: `"BHyve Sprinkler"`) |
+| `controller_name` | Subtitle shown below the title (default: `"Smart Controller"`) |
+| `columns` | `1` or `2` column zone grid (default: `2`) |
+| `schedule_days` | Fallback watering days `[0..6]` used when a zone has no per-zone schedule |
+| `schedule_time` | Fallback start time `HH:MM` used when a zone has no per-zone schedule (default: `'06:00'`) |
+| `show_actions` | Show/hide the Run all / Stop all action bar (default: `true`) |
+
 ### Per-zone fields
 
 | Field | Description |
@@ -119,13 +129,13 @@ zones:
 | `entity` | Zone switch or valve entity (`switch.*` or `valve.*`) |
 | `name` | Display name |
 | `run_time` | Minutes to run when tapping Run or Run all |
-| `hub_entity` | Entity reporting hub online/offline status |
-| `battery_entity` | Battery level sensor for this zone's device |
+| `hub_entity` | Entity reporting hub online/offline status — shows Wi-Fi hub row |
+| `battery_entity` | Battery level sensor — shows colour-coded health chip |
 | `program_entities` | Program switch entities — enables on/off toggles per program |
 | `smart_watering_entity` | Smart watering switch entity — shows a live toggle in the Settings section |
 | `schedule_days` | Watering days `[0..6]` (overrides card-level fallback) |
 | `schedule_time` | Start time `HH:MM` (overrides card-level fallback) |
-| `rain_delay_entity` | Rain delay switch/binary sensor (overrides card-level fallback) |
+| `rain_delay_entity` | Rain delay switch/binary sensor — shows pill in zone footer |
 | `show_sprinkler_type` | Show/hide sprinkler type badge (default `true`) |
 | `show_programs` | Show/hide programs section (default `true`) |
 
@@ -135,7 +145,7 @@ The card reads program schedules in this priority order:
 
 1. **`program_entities`** — enabled programs (`state: on`) only; reads `frequency.days` and `start_times` from each switch entity's attributes
 2. **`program_a/b/c/e` zone attributes** — read-only fallback from the zone switch itself when no program entities are configured
-3. **`schedule_days` + `schedule_time`** — manual card/zone-level fallback
+3. **`schedule_days` + `schedule_time`** — per-zone value, or card-level fallback when no per-zone schedule is set
 
 For each program it finds the earliest future start time across all configured times. If today is a scheduled watering day but all start times have already passed, the next run advances to the same weekday next week.
 
@@ -157,7 +167,6 @@ When `program_entities` is not set, the card reads `program_a`, `program_b`, `pr
 | **Smart watering toggle** | `homeassistant.turn_on` / `turn_off` on the smart watering switch entity |
 | **Run all** | Run logic applied to every zone in sequence |
 | **Stop all** | Stop logic applied to every zone |
-| **Rain delay** | `bhyve.enable_rain_delay` (24 h) / `bhyve.disable_rain_delay` → falls back to `homeassistant.toggle` |
 
 ---
 
@@ -173,9 +182,9 @@ When `program_entities` is not set, the card reads `program_a`, `program_b`, `pr
 
 **Hub shows Offline unexpectedly** — the hub row maps `on/home/connected/online` → Online and `off/away/disconnected/offline/unavailable` → Offline. Any other state string is shown as-is.
 
-**Rain delay button does nothing** — confirm `rain_delay_entity` is set (either per-zone or at card level) and that `bhyve.enable_rain_delay` / `bhyve.disable_rain_delay` are available in your integration version.
+**Rain delay pill not showing** — confirm `rain_delay_entity` is set per-zone and that the entity state is `on`. The pill appears in the zone footer when the entity is active, and shows `hours_remaining` from the entity's attributes when available.
 
-**Next run not calculating** — configure `program_entities` so the card can read enabled program schedules, or set `schedule_days` and `schedule_time` as a fallback.
+**Next run not calculating** — configure `program_entities` so the card can read enabled program schedules, or set `schedule_days` and `schedule_time` (per-zone or at card level) as a fallback.
 
 ---
 
@@ -185,7 +194,7 @@ When `program_entities` is not set, the card reads `program_a`, `program_b`, `pr
 # Syntax check
 node --check bhyve-sprinkler-card.js
 
-# Full test suite (248 tests, no browser needed)
+# Full test suite (no browser needed)
 node validate.test.js
 ```
 
