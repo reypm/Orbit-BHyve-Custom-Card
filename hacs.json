@@ -1,0 +1,8 @@
+{
+  "name": "BHyve Sprinkler Card",
+  "description": "Feature-rich Lovelace card for Orbit BHyve smart sprinkler systems. Displays zone status, schedules, rain delay, device health and provides one-tap controls — fully configurable through the Home Assistant UI editor.",
+  "content_in_root": true,
+  "filename": "bhyve-sprinkler-card.js",
+  "homeassistant": "2023.1.0",
+  "render_readme": true
+}
