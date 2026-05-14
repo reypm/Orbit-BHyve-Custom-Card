@@ -2,27 +2,27 @@
 
 A custom Lovelace card for [Orbit BHyve](https://bhyve.orbitonline.com/) smart sprinkler systems in Home Assistant, built specifically for the [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant) integration.
 
-![Zone card showing Programs, Settings (smart watering toggle), Health chips, and next-run footer](docs/preview.png)
+Styled with the [Mushroom](https://github.com/piitaya/lovelace-mushroom) design system — shape icons, chip-style buttons, and `--mush-*` CSS tokens throughout. Looks native on any Mushroom dashboard.
 
-*Left: Zone 1 running with all sections visible — Programs with on/off toggles, Settings with Smart Watering toggle, Health chips, and next-run footer. Zone 2 idle with rain delay pill. Right panel: HA Companion App view.*
-
-![Mobile — HA Companion App](docs/preview-mobile.png)
+> **Screenshots** — updated screenshots will be added after the card is deployed to a live HA instance.
 
 ---
 
 ## Features
 
-- **Self-contained zone cards** — each zone has its own header (`Name | Status` + Run/Stop button), Wi-Fi hub row, Programs list with toggles, Settings section, health chips, and next-run footer
+- **Mushroom design language** — shape icons, pill chips, and Mushroom CSS tokens (`--mush-rgb-*`, `--mush-chip-*`, `--mush-icon-*`) with HA variable fallbacks
+- **Self-contained zone cards** — each zone shows a shape icon, name/status, chip-style Run/Stop button, Wi-Fi hub row, Programs list with toggles, Settings section, health chips, and next-run footer
 - **Program-aware next run** — reads `program_a/b/c/e` start times and frequency directly from zone switch attributes; calculates the exact next scheduled run across all enabled programs, including the "all runs passed today → next week" case
-- **Smart watering toggle** — point `smart_watering_entity` at the zone's smart watering switch (e.g. `switch.timer_zone_1_inside_smart_watering`) to get a live on/off toggle in the Settings section
+- **Smart watering toggle** — point `smart_watering_entity` at the zone's smart watering switch to get a live on/off toggle in the Settings section
 - **Programs with on/off toggles** — configure `program_entities` per zone to enable real-time program switching; falls back to read-only display from zone switch attributes when not set
 - **Per-zone everything** — Wi-Fi hub, battery, health chips, rain delay, schedule, smart watering, and programs are all configured independently per zone with card-level schedule fallbacks
 - **Uses BHyve services** — `bhyve.start_watering`, `bhyve.stop_watering` called automatically; falls back to generic HA services
-- **Smart status badge** — header shows running zone name, "N zones running", "Rain delay", or "All idle"
+- **Smart status badge** — header chip shows running zone name, "N zones running", "Rain delay", or "All idle"
+- **Live elapsed-time counter** — self-refreshes every 30 seconds while a zone is running so the timer bar and elapsed time stay current without relying on frequent HA state pushes
 - **Optimistic UI** — all toggles and Run/Stop update instantly before HA confirms; handles `switch` and `valve` domains
 - **1 or 2-column layout** — configurable per card
 - **Fully UI-configurable** — every setting in the visual editor; no YAML required
-- **Zero dependencies** — single vanilla-JS file, no NPM, no bundler, no HACS front-end dependencies
+- **Zero build dependencies** — single JS file, no NPM, no bundler
 
 ---
 
@@ -30,6 +30,7 @@ A custom Lovelace card for [Orbit BHyve](https://bhyve.orbitonline.com/) smart s
 
 - Home Assistant 2023.1 or later
 - [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant) integration
+- [lovelace-mushroom](https://github.com/piitaya/lovelace-mushroom) (recommended — provides `--mush-*` CSS tokens; card degrades gracefully to HA defaults without it)
 
 ---
 
