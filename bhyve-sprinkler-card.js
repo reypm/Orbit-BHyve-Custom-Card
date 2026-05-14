@@ -161,7 +161,7 @@
     .zc-timer-fill {
       height: 100%; background: var(--_success);
       border-radius: 0 2px 2px 0;
-      transition: width 60s linear;
+      transition: width 0.4s ease;
     }
 
     /* Section dividers inside card */
@@ -575,10 +575,30 @@
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this._config    = null;
-      this._hass      = null;
+      this._config     = null;
+      this._hass       = null;
       this._pendingOn  = new Set(); // optimistic "running" entities
       this._pendingOff = new Set(); // optimistic "stopped" entities
+      this._activeTimer = null;    // interval that refreshes elapsed-time while zones run
+    }
+
+    disconnectedCallback() {
+      if (this._activeTimer) {
+        clearInterval(this._activeTimer);
+        this._activeTimer = null;
+      }
+    }
+
+    // Start a 30-second refresh interval while any zone is running so the
+    // elapsed-time counter and progress bar stay current even when HA is not
+    // pushing frequent hass updates for the bhyve entities.
+    _syncActiveTimer(hasActiveZones) {
+      if (hasActiveZones && !this._activeTimer) {
+        this._activeTimer = setInterval(() => this._render(), 30000);
+      } else if (!hasActiveZones && this._activeTimer) {
+        clearInterval(this._activeTimer);
+        this._activeTimer = null;
+      }
     }
 
     // ── HA lifecycle ──────────────────────────────────────────────
@@ -859,6 +879,7 @@
       `;
 
       this._bindEvents();
+      this._syncActiveTimer(active > 0);
     }
 
     _tplHeader(c, statusClass, statusText, active) {
