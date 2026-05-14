@@ -1332,7 +1332,6 @@
         const el = root.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => this._patch(id, el.value));
-        el.addEventListener('input',  () => this._patch(id, el.value));
       });
       const cols = root.getElementById('columns');
       if (cols) cols.addEventListener('change', () => this._patch('columns', parseInt(cols.value)));
