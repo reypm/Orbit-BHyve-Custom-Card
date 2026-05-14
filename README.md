@@ -4,7 +4,9 @@ A custom Lovelace card for [Orbit BHyve](https://bhyve.orbitonline.com/) smart s
 
 Styled with the [Mushroom](https://github.com/piitaya/lovelace-mushroom) design system — shape icons, chip-style buttons, and `--mush-*` CSS tokens throughout. Looks native on any Mushroom dashboard.
 
-> **Screenshots** — updated screenshots will be added after the card is deployed to a live HA instance.
+| Desktop (2-column) | Mobile (1-column) |
+|---|---|
+| ![Desktop preview](docs/preview.png) | ![Mobile preview](docs/preview-mobile.png) |
 
 ---
 
