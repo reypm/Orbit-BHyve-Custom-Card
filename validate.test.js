@@ -73,8 +73,6 @@ assert(typeof card.getCardSize === 'function', 'getCardSize() exists');
 assert(typeof card._render     === 'function', '_render() exists');
 assert(typeof card._tplHeader  === 'function', '_tplHeader() exists');
 assert(typeof card._tplZones   === 'function', '_tplZones() exists');
-assert(typeof card._tplNextRun === 'function', '_tplNextRun() exists');
-assert(typeof card._tplHealth  === 'function', '_tplHealth() exists');
 assert(typeof card._tplActions === 'function', '_tplActions() exists');
 
 // ── 4. setConfig behaviour ─────────────────────────────────────────────────
@@ -133,11 +131,11 @@ card._hass = { states: {} };
 const hdrActive = card._tplHeader(card._config, 'active', '2 zones running', 'active');
 assert(hdrActive.includes('My Garden'),              'header shows title');
 assert(hdrActive.includes('Backyard Controller'),    'header shows controller name');
-assert(hdrActive.includes('status-badge active'),    'header has active badge');
+assert(hdrActive.includes('chip green'),             'header has active (green) chip');
 
 const hdrRain = card._tplHeader(card._config, 'rain', 'Rain delay', 'rain');
-assert(hdrRain.includes('status-badge rain'),        'header has rain badge');
-assert(hdrRain.includes('device-icon rain'),         'device icon has rain class');
+assert(hdrRain.includes('chip blue'),                'header has rain (blue) chip');
+assert(hdrRain.includes('shape-icon rain'),          'shape icon has rain class');
 
 // ── 8. getCardSize ─────────────────────────────────────────────────────────
 process.stdout.write('\n[8] getCardSize()\n');
@@ -299,9 +297,9 @@ assert(typeof ed2._bindDragDrop === 'function', '_bindDragDrop() method exists')
 assert(code.includes('friendly_name'), 'zone selector auto-fills name from friendly_name');
 
 // Per-chip health toggles
-assert(code.includes('show_health_battery'),   'show_health_battery toggle exists');
-assert(code.includes('show_health_last_seen'), 'show_health_last_seen toggle exists');
-assert(code.includes('show_health_zones'),     'show_health_zones toggle exists');
+assert(code.includes('battery_entity'),        'battery_entity field used for health chip');
+assert(code.includes('last_updated'),          'last_updated used for last-seen chip');
+assert(code.includes('zc-health'),             'zc-health container class exists');
 
 // Wifi removed
 assert(!code.includes('wifi_entity'),          'wifi_entity removed from card');
@@ -326,7 +324,6 @@ process.stdout.write('\n[12] zone card wireframe structure\n');
   const idle = c4._tplZones(c4._config.zones, 1, c4._config, false);
   assert(idle.includes('zc-header'),          'idle: zc-header row present');
   assert(idle.includes('zc-name'),            'idle: zc-name element present');
-  assert(idle.includes('zc-sep'),             'idle: zc-sep separator present');
   assert(idle.includes('zc-status'),          'idle: zc-status element present');
   assert(idle.includes('Idle'),               'idle: status text is Idle');
   assert(idle.includes('zc-run-btn idle'),    'idle: run button has idle class');
@@ -349,7 +346,7 @@ process.stdout.write('\n[12] zone card wireframe structure\n');
 
   // ── Name and separator ──
   assert(idle.includes('Front Lawn'),         'zone name shown in header');
-  assert(idle.includes('zc-sep'),             'separator | present between name and status');
+  assert(idle.includes('zc-status'),          'zone status shown below name in header');
 }
 
 // ── 13. Per-zone Wi-Fi hub row ──────────────────────────────────
@@ -465,27 +462,27 @@ process.stdout.write('\n[16] per-zone health chips\n');
   }};
   c8.setConfig({ zones: [{ entity: 'switch.z1', name: 'Zone 1', run_time: 10, battery_entity: 'sensor.battery1' }] });
   const goodBat = c8._tplZones(c8._config.zones, 1, c8._config, false);
-  assert(goodBat.includes('zc-chip'),           'zc-chip rendered when battery_entity set');
-  assert(goodBat.includes('zc-chip-val g'),     'good class for battery >50%');
+  assert(goodBat.includes('zc-health'),         'zc-health section rendered when battery_entity set');
+  assert(goodBat.includes('chip sm'),           'chip sm used for health chips');
   assert(goodBat.includes('85%'),               'battery percentage shown');
-  assert(goodBat.includes('Battery'),           'Battery label shown');
-  assert(goodBat.includes('Last seen'),         'Last seen chip shown from last_updated');
+  assert(goodBat.includes('class="g"'),         'good class on icon for battery >50%');
+  assert(goodBat.includes('mdi:clock-check-outline'), 'last-seen chip shown from last_updated');
 
   // Warn battery (20-50%)
   c8._hass.states['sensor.battery1'].state = '30';
   const warnBat = c8._tplZones(c8._config.zones, 1, c8._config, false);
-  assert(warnBat.includes('zc-chip-val w'),     'warn class for battery 20-50%');
+  assert(warnBat.includes('class="w"'),         'warn class on icon for battery 20-50%');
 
   // Bad battery (<20%)
   c8._hass.states['sensor.battery1'].state = '10';
   const badBat = c8._tplZones(c8._config.zones, 1, c8._config, false);
-  assert(badBat.includes('zc-chip-val b'),      'bad class for battery <20%');
+  assert(badBat.includes('class="b"'),          'bad class on icon for battery <20%');
 
   // No battery entity — health shows last-seen only
   c8.setConfig({ zones: [{ entity: 'switch.z1', name: 'Zone 1', run_time: 10 }] });
   const noBat = c8._tplZones(c8._config.zones, 1, c8._config, false);
-  assert(!noBat.includes('Battery'),            'battery chip hidden when no battery_entity');
-  assert(noBat.includes('Last seen'),           'last-seen chip still shown without battery');
+  assert(!noBat.includes('mdi:battery'),        'battery chip hidden when no battery_entity');
+  assert(noBat.includes('mdi:clock-check-outline'), 'last-seen chip still shown without battery');
 }
 
 // ── 17. Zone meta badges (sprinkler type + smart watering) ───────
@@ -804,7 +801,7 @@ process.stdout.write('\n[25] per-zone schedule, display toggles, rain delay\n');
     rain_delay_entity: 'switch.rain_card',
   });
   const zoneHtml = cz2._tplZones(cz2._config.zones, 1, cz2._config, false);
-  assert(zoneHtml.includes('zc-rain-pill'),        'per-zone rain delay: pill shown when zone entity active');
+  assert(zoneHtml.includes('chip sm blue'),         'per-zone rain delay: pill shown when zone entity active');
   assert(zoneHtml.includes('24 hr delay'),          'per-zone rain delay: hours_remaining shown');
 
   // --- Per-zone display toggles ---
