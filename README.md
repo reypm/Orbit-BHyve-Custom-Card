@@ -326,10 +326,12 @@ confirm the entity is the zone valve.
 **The run-time stepper doesn't change the zone cards** *(controller card)* — expected. The
 integration reads `manual_preset_runtime` once when it builds the valve entity and never
 refreshes it, so a successful `bhyve.set_manual_preset_runtime` is not reflected in the
-attribute until the integration reloads. The stepper's own value updates immediately and is
-used by the controller's rows; zone cards pick it up after a reload. If the device rejects
-the call outright the card says so beneath the stepper and keeps the value locally. Support
-for that service is patchy — set `run_time` per zone card if your device does not take it.
+attribute until the integration reloads. Tracked upstream:
+[sebr/bhyve-home-assistant#478](https://github.com/sebr/bhyve-home-assistant/issues/478).
+The stepper's own value updates immediately and is used by the controller's rows; zone
+cards pick it up after a reload. If the device rejects the call outright the card says so
+beneath the stepper and keeps the value locally. Support for that service is patchy — set
+`run_time` per zone card if your device does not take it.
 
 **A chip is missing** *(zone card)* — each chip has its own rule; see
 [The chip row](#the-chip-row). Last-run chips need the zone to have run at least once, and

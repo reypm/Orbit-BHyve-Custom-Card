@@ -81,6 +81,8 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
   `_manual_preset_runtime` in its constructor and has no coordinator-update hook, so the
   attribute cannot change during a session. Do not add a "did the attribute change?"
   confirmation to the run-time stepper — it would report failure on every success.
+  Tracked upstream: https://github.com/sebr/bhyve-home-assistant/issues/478 — if that lands,
+  the stepper could gain real confirmation and this constraint can be revisited.
 - **Optimistic UI:** `_pendingOn` / `_pendingOff` sets, cleared when HA confirms or on a
   timeout. `_isOn()` checks them before HA state; `open` → true for valves.
 - **Live countdown:** recomputed from `started_watering_station_at` plus the run minutes,
