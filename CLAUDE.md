@@ -88,7 +88,9 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
 | `validate.test.js` | Headless test suite (Node.js, no browser) |
 | `hacs.json` | HACS manifest |
 | `README.md` | User-facing documentation |
-| `docs/` | Preview screenshots (still show the v2 card) |
+| `docs/` | Preview screenshots (regenerated from `tools/harness.html`) |
+| `tools/harness.html` | Browser render harness for both cards (mocked hass) |
+| `DESIGN_DECISIONS.md` | Where the design file overrode the written brief, and why |
 
 ## Requirements
 

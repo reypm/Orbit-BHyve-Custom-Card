@@ -18,6 +18,15 @@ controller card to use them, or vice versa.
 > **v3 is a breaking change.** The single `bhyve-sprinkler-card` is gone.
 > See [Migrating from v2](#migrating-from-v2).
 
+![Controller card beside two zone cards on a Home Assistant dashboard](docs/preview.png)
+
+<details>
+<summary>Dark theme</summary>
+
+![The same dashboard section in dark theme](docs/preview-dark.png)
+
+</details>
+
 ---
 
 ## Requirements
@@ -110,6 +119,13 @@ Top to bottom:
 `show_actions: false` hides the Run/Stop buttons and the drawer, giving a read-only
 overview. The Auto/Off control stays.
 
+<img src="docs/controller-card.png" alt="Controller card with the programs and settings drawer expanded" width="380">
+
+Switching the device to **Off** swaps the status to an orange banner, since no program
+will run until it goes back to Auto:
+
+![Controller and zone card while the device mode is Off](docs/zone-card-off.png)
+
 ### Controller card fields
 
 | Field | Type | Default | Notes |
@@ -164,6 +180,8 @@ is discovered from the zone's own device.
 
 The zone card has no expander. Smart watering and program rows render directly.
 
+![The four zone card states side by side: idle, running, fault and unavailable](docs/zone-card-states.png)
+
 ### The chip row
 
 Fixed order, not configurable. Each chip has its own visibility rule.
@@ -212,6 +230,8 @@ The chip is omitted entirely when the entity is not configured, unavailable, or 
 Point a zone card at a B-hyve flood sensor's `binary_sensor` and it renders the flood
 layout instead: a home icon (blue when dry, red when wet), `Dry` or
 `Water detected · HH:MM`, and chips for temperature, signal strength and battery.
+
+![Flood sensor card in the dry and water-detected states](docs/flood-sensor.png)
 
 ---
 
@@ -285,6 +305,8 @@ registered under Settings → Dashboards → Resources.
 registry. Confirm the integration is loaded, then set `device_id` explicitly. Note that
 discovery reads the registry once per page load; reload after adding devices.
 
+<img src="docs/empty-state.png" alt="The empty state: No B-hyve devices found" width="380">
+
 **Zone stays Idle after tapping Run** *(zone card, controller card)* — the cards use
 optimistic state. If it snaps back, check the HA log for `bhyve.start_watering` errors and
 confirm the entity is the zone valve.
@@ -316,6 +338,22 @@ card Run buttons are unaffected.
 node --check bhyve-cards.js
 node validate.test.js
 ```
+
+`tools/harness.html` renders both cards in a browser against a mocked Home Assistant —
+real HA theme variables, real MDI icon paths, and stand-ins for `ha-card` / `ha-icon`.
+Open it directly (`file://…/tools/harness.html?mush=design`) or screenshot it headless:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --window-size=900,4300 --force-device-scale-factor=2 \
+  --screenshot=gallery.png "file://$PWD/tools/harness.html?mush=design"
+```
+
+Query parameters: `state=<substring>` renders one state, `w=<px>` sets the card width
+(for checking text overflow), `mush=design|teal|none` controls the `--mush-rgb-*`
+override, and `preview=1` produces the README image.
+
+Read [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) before changing anything visual.
 
 `validate.test.js` is headless — it stubs the browser globals it needs and evaluates the
 card file, then renders both cards against a fake device/entity registry and dispatches
