@@ -83,6 +83,12 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
   confirmation to the run-time stepper — it would report failure on every success.
   Tracked upstream: https://github.com/sebr/bhyve-home-assistant/issues/478 — if that lands,
   the stepper could gain real confirmation and this constraint can be revisited.
+- **Programs are a single-selection group.** B-hyve hardware runs one program at a time, so
+  `_selectProgram()` issues `switch.turn_on` for the tapped entity and `switch.turn_off` for
+  the outgoing one in the same handler, setting optimistic state for both before either call
+  is dispatched. Smart watering is deliberately outside this group and keeps its own
+  `_toggle()` path. `show_programs` was retired on the zone card in v4 (the section folds
+  itself); the controller card's option of the same name is unrelated and still live.
 - **Optimistic UI:** `_pendingOn` / `_pendingOff` sets, cleared when HA confirms or on a
   timeout. `_isOn()` checks them before HA state; `open` → true for valves.
 - **Live countdown:** recomputed from `started_watering_station_at` plus the run minutes,

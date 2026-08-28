@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION   = '3.2.0';
+  const CARD_VERSION   = '4.0.0';
   const CONTROLLER     = 'bhyve-controller-card';
   const ZONE           = 'bhyve-zone-card';
   const CONTROLLER_ED  = 'bhyve-controller-card-editor';
@@ -49,6 +49,8 @@
     timer:      'mdi:timer-outline',
     smart:      'mdi:brain',
     calendar:   'mdi:calendar-month',
+    noProgram:  'mdi:calendar-remove',
+    more:       'mdi:dots-horizontal',
     minus:      'mdi:minus',
     plus:       'mdi:plus',
     play:       'mdi:play',
@@ -177,6 +179,13 @@
     }
     .sw.on .sw-knob { background: #fff; }
 
+    .chevron {
+      width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bh-shape);
+    }
+    .chevron ha-icon { --mdc-icon-size: 22px; color: var(--secondary-text-color); }
+
     /* ── Progress bar ────────────────────────────────────────────────── */
     .bar { height: 4px; background: var(--bh-track); }
     .bar > div {
@@ -241,13 +250,6 @@
       display: block; font-size: 11.5px; line-height: 15px; color: var(--secondary-text-color);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .chevron {
-      width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--bh-shape);
-    }
-    .chevron ha-icon { --mdc-icon-size: 22px; color: var(--secondary-text-color); }
-
     .drawer { padding: 6px 10px 12px; display: flex; flex-direction: column; gap: 2px; }
     .drawer .row { padding: 6px; }
     .drawer-title { padding: 8px 6px 4px; }
@@ -295,10 +297,30 @@
   const ZONE_STYLES = `
     .zone-actions { display: flex; gap: 8px; padding: 0 10px 10px; }
     .zone-actions .btn { flex: 1; }
-    .rows { padding: 0 10px 6px; }
+    .rows-divider { height: 1px; background: var(--bh-divider); margin: 0 10px; }
+    .rows {
+      padding: 6px 10px 10px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
     .rows .row { padding: 6px; }
-    .rows .row.first { border-top: 1px solid var(--bh-divider); }
-    .rows .row.last { padding-bottom: 10px; }
+    /* The one enabled program carries a 10% accent fill. */
+    .rows .row.prog-on {
+      border-radius: 12px; background: rgba(${RGB.accent}, .10);
+    }
+    .rows .secondary.accent { color: rgb(${RGB.accent}); }
+
+    .fold-btn {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 6px; border-radius: 12px; background: transparent;
+      transition: background-color 180ms;
+    }
+    .fold-btn.open, .fold-btn:hover { background: var(--bh-shape); }
+    .fold-label {
+      flex: 1; text-align: left; min-width: 0;
+      font-size: 14px; font-weight: 500; line-height: 20px;
+      color: var(--secondary-text-color);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
   `;
 
   // ---------------------------------------------------------------------------
@@ -842,7 +864,7 @@
       if (!config || !config.entity) {
         throw new Error('[bhyve-zone-card] "entity" is required (the zone valve).');
       }
-      this._config = Object.assign({ run_time: 10, show_programs: true }, config);
+      this._config = Object.assign({ run_time: 10 }, config);
       if (this._hass) this._render();
     }
 
@@ -1023,12 +1045,15 @@
         </div>`;
     }
 
-    // Rendered inline — the zone card has no expander.
+    // Programs are a single-selection group: B-hyve hardware runs one program
+    // at a time. The section shows Smart watering, the one enabled program (or
+    // a neutral row saying there is none), and folds the rest away.
     _rows(r) {
-      // Omitted from the DOM entirely, like every other optional element here.
-      if (this._config.show_programs === false) return '';
       const rows = [];
 
+      // Smart watering is exempt from all of it — it adjusts whatever schedule
+      // runs rather than competing with the lettered programs for exclusivity,
+      // so it is always first, always visible, and never counted as disabled.
       if (r.smartWatering) {
         const on = this._isOn(r.smartWatering);
         const moisture = num(this._attr(r.smartWatering, 'soil_moisture_level'))
@@ -1036,7 +1061,7 @@
         const detail = moisture != null
           ? 'Soil moisture ' + Math.round(moisture) + '%' : (on ? 'Enabled' : 'Disabled');
         rows.push(`
-          <div class="row first">
+          <div class="row">
             ${shapeHtml(ICON.smart, on ? RGB.purple : RGB.grey)}
             <div class="grow">
               <div class="primary">Smart watering</div>
@@ -1046,22 +1071,89 @@
           </div>`);
       }
 
-      (r.programs || []).forEach((pid, i) => {
-        const on = this._isOn(pid);
-        const last = i === r.programs.length - 1 ? ' last' : '';
-        const first = !r.smartWatering && i === 0 ? ' first' : '';
-        rows.push(`
-          <div class="row${first}${last}">
-            ${shapeHtml(programIcon(this._hass, pid), on ? RGB.accent : RGB.grey)}
-            <div class="grow">
-              <div class="primary">${esc(programName(this._hass, pid))}</div>
-              <div class="secondary">${esc(programSummary(this._hass, pid, r.station))}</div>
-            </div>
-            ${swHtml(on, false, `data-act="toggle" data-entity="${esc(pid)}"`)}
-          </div>`);
-      });
+      const programs = r.programs || [];
+      // If the B-hyve app has left two programs on, show the first as enabled
+      // and leave the other in the list still reading on, rather than silently
+      // correcting something the user did elsewhere.
+      const enabledId = programs.filter(pid => this._isOn(pid))[0] || null;
+      const rest = programs.filter(pid => pid !== enabledId);
 
-      return rows.length ? `<div class="rows">${rows.join('')}</div>` : '';
+      if (enabledId) {
+        rows.push(this._programRow(r, enabledId, true));
+      } else {
+        // A zone with no schedule is a legitimate setup, not a fault — neutral
+        // colours, and no switch on this row.
+        rows.push(`
+          <div class="row">
+            ${shapeHtml(ICON.noProgram, RGB.grey)}
+            <div class="grow">
+              <div class="primary muted">No program enabled</div>
+              <div class="secondary">This zone only waters when you run it manually</div>
+            </div>
+          </div>`);
+      }
+
+      if (rest.length) {
+        const open  = !!this._programsOpen;
+        const label = (open ? 'Hide ' : '') + rest.length +
+          (rest.length === 1 ? ' disabled program' : ' disabled programs');
+        rows.push(`
+          <button class="fold-btn${open ? ' open' : ''}" data-act="programs-fold">
+            ${shapeHtml(ICON.more, RGB.grey)}
+            <span class="fold-label">${esc(label)}</span>
+            <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
+          </button>`);
+        if (open) {
+          rest.forEach(pid => rows.push(this._programRow(r, pid, this._isOn(pid))));
+        }
+      }
+
+      return rows.length
+        ? `<div class="rows-divider"></div><div class="rows">${rows.join('')}</div>`
+        : '';
+    }
+
+    _programRow(r, pid, on) {
+      return `
+        <div class="row${on ? ' prog-on' : ''}">
+          ${shapeHtml(ICON.calendar, on ? RGB.accent : RGB.grey)}
+          <div class="grow">
+            <div class="primary${on ? '' : ' muted'}">${esc(programName(this._hass, pid))}</div>
+            <div class="secondary${on ? ' accent' : ''}">${esc(programSummary(this._hass, pid, r.station))}</div>
+          </div>
+          ${swHtml(on, false, `data-act="program" data-entity="${esc(pid)}"`)}
+        </div>`;
+    }
+
+    // Enabling a program disables whichever one was on, in the same handler.
+    // Both calls are dispatched together and the optimistic state is set before
+    // either is issued, so both rows move on the same render rather than
+    // waiting on the round trip.
+    _selectProgram(programs, tappedId) {
+      if (!tappedId) return;
+      const currentId = (programs || []).filter(pid => this._isOn(pid))[0] || null;
+      const touched = [tappedId];
+
+      if (currentId === tappedId) {
+        // Turning the enabled one off is a valid end state, not a no-op: the
+        // zone simply has no program until one is picked.
+        this._pendingOff.add(tappedId); this._pendingOn.delete(tappedId);
+        this._svc('switch', 'turn_off', { entity_id: tappedId });
+      } else {
+        this._pendingOn.add(tappedId); this._pendingOff.delete(tappedId);
+        this._svc('switch', 'turn_on', { entity_id: tappedId });
+        if (currentId) {
+          this._pendingOff.add(currentId); this._pendingOn.delete(currentId);
+          this._svc('switch', 'turn_off', { entity_id: currentId });
+          touched.push(currentId);
+        }
+      }
+
+      this._render();
+      setTimeout(() => {
+        touched.forEach(id => { this._pendingOn.delete(id); this._pendingOff.delete(id); });
+        this._render();
+      }, 8000);
     }
 
     _renderFlood() {
@@ -1125,6 +1217,10 @@
           else if (act === 'rain')  this._setRainDelay(r.rainDelay, this._config.rain_delay_hours);
           else if (act === 'smart') this._toggle(r.smartWatering);
           else if (act === 'toggle') this._toggle(el.dataset.entity);
+          else if (act === 'program') this._selectProgram(r.programs, el.dataset.entity);
+          else if (act === 'programs-fold') {
+            this._programsOpen = !this._programsOpen; this._render();
+          }
         });
       });
     }
@@ -1488,7 +1584,6 @@
     entity:       'Zone valve (or flood sensor)',
     name:         'Name override',
     run_time:     'Run time (minutes)',
-    show_programs: 'Show smart watering and programs',
   };
 
   class BhyveEditorBase extends HTMLElement {
@@ -1577,7 +1672,6 @@
         { name: 'name',     selector: { text: {} } },
         { name: 'run_time', selector: { number: { min: 1, max: 60, mode: 'box',
                                                   unit_of_measurement: 'min' } } },
-        { name: 'show_programs', selector: { boolean: {} } },
       ];
     }
     _hint() {

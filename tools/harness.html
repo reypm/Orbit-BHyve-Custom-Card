@@ -94,6 +94,7 @@ const REG_ENTITIES=[
  ['binary_sensor.bhyve_xr_fault',DEV1],['switch.bhyve_xr_rain_delay',DEV1],
  ['switch.front_lawn_smart_watering',DEV1],
  ['switch.bhyve_xr_a_program',DEV1],['switch.bhyve_xr_b_program',DEV1],['switch.bhyve_xr_e_program',DEV1],
+ ['switch.bhyve_xr_c_program',DEV1],['switch.bhyve_xr_d_program',DEV1],['switch.bhyve_xr_f_program',DEV1],
  ['select.bhyve_xr_device_mode',DEV1],['sensor.bhyve_xr_next_watering',DEV1],
  ['binary_sensor.basement_flood_sensor',DEV2],['sensor.basement_temperature',DEV2],
  ['sensor.basement_signal_strength',DEV2],['sensor.basement_battery_level',DEV2],
@@ -131,8 +132,14 @@ function baseStates(){return{
    start_times:['06:00'],run_times:[{station:1,run_time:10},{station:2,run_time:8}]}),
  'switch.bhyve_xr_b_program':st('off',{friendly_name:'Program B',frequency:{interval:4},
    start_times:['04:15'],run_times:[{station:2,run_time:25}]}),
- 'switch.bhyve_xr_e_program':st('on',{friendly_name:'Program E',is_smart_program:true,
+ 'switch.bhyve_xr_e_program':st('off',{friendly_name:'Program E · Smart',is_smart_program:true,
    run_times:[{station:1,run_time:12}]}),
+ 'switch.bhyve_xr_c_program':st('off',{friendly_name:'Program C · Overseed',
+   frequency:{days:[0,6]},start_times:['05:30'],run_times:[{station:1,run_time:15}]}),
+ 'switch.bhyve_xr_d_program':st('off',{friendly_name:'Program D · Winter',
+   frequency:{interval:14},start_times:['09:00'],run_times:[{station:1,run_time:5}]}),
+ 'switch.bhyve_xr_f_program':st('off',{friendly_name:'Program F · Away',
+   frequency:{days:[3]},start_times:['22:00'],run_times:[{station:1,run_time:8}]}),
  'select.bhyve_xr_device_mode':st('auto',{options:['auto','off']}),
  'sensor.bhyve_xr_next_watering':st(future,{programs:['a']}),
  'binary_sensor.basement_flood_sensor':st('off',{device_class:'moisture'}),
@@ -232,6 +239,23 @@ const RECIPES = {
   'flood-sensor': {theme:'light', caps:true, cols:[
     [{cap:'Dry',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'}}],
     [{cap:'Water detected',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'},mutate:wet}]]},
+  'zone-programs': {theme:'light', caps:true, cols:[
+    [{cap:'Collapsed (default)',tag:ZN,cfg:{entity:'valve.front_lawn'}},
+     {cap:'No program enabled',tag:ZN,cfg:{entity:'valve.front_lawn'},
+      mutate:s2=>{['a','b','c','d','e','f'].forEach(L=>{
+        const k='switch.bhyve_xr_'+L+'_program';
+        s2[k]=st('off',Object.assign({},s2[k].attributes));});}}],
+    [{cap:'Expanded',tag:ZN,cfg:{entity:'valve.front_lawn'},
+      after:c=>{c._programsOpen=true;c._render();}}]]},
+  'zone-selection': {theme:'light', caps:true, cols:[
+    [{cap:'Before — Program A enabled',tag:ZN,cfg:{entity:'valve.front_lawn'},
+      after:c=>{c._programsOpen=true;c._render();}}],
+    [{cap:'After — tapped Program C',tag:ZN,cfg:{entity:'valve.front_lawn'},
+      after:c=>{c._programsOpen=true;c._render();
+        c.shadowRoot.querySelectorAll('[data-act]').forEach(e=>{
+          if(e.dataset.act==='program'&&e.dataset.entity==='switch.bhyve_xr_c_program')
+            e.click();});
+        c._programsOpen=true;c._render();}}]]},
   'preview-mobile': {theme:'light', colw:343, pad:16, cols:[
     [{tag:CTRL,cfg:{}},{tag:ZN,cfg:{entity:'valve.front_lawn'}}]]},
   'empty-state': {theme:'light', cols:[

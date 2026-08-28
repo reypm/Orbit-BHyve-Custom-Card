@@ -206,6 +206,7 @@ function makeHass(opts) {
 }
 
 const flush = () => new Promise(r => setTimeout(r, 0));
+const RGB_RED_HINT = 'banner red';
 
 // Markup with the inline <style> block stripped — class-name assertions must
 // test what was rendered, not the stylesheet that ships alongside it.
@@ -259,7 +260,7 @@ async function main() {
   assert(window.customCards.length === 2, 'two customCards entries');
   assert(window.customCards.every(c => c.preview === true), 'both marked preview');
   // Keep the shipped version in step with the release tag.
-  const EXPECTED_VERSION = '3.2.0';
+  const EXPECTED_VERSION = '4.0.0';
   assert(code.indexOf("CARD_VERSION   = '" + EXPECTED_VERSION + "'") !== -1,
          'version constant is ' + EXPECTED_VERSION);
 
@@ -282,24 +283,27 @@ async function main() {
   assert(html.indexOf('class="bar"') === -1, 'idle has no progress bar');
   assert(body(html).indexOf('accent-red') === -1, 'idle card is not red-accented');
   assert(html.indexOf('data-act="drawer"') === -1, 'idle zone card has no expander');
-  // Garden Beds is station 2, which programs A and B both target, so its
-  // program rows render inline.
-  assert(html.indexOf('class="rows"') !== -1, 'idle zone renders its programs inline');
+  // Garden Beds is station 2, which programs A and B both target. A is on, so
+  // v4 shows only A inline and folds B away.
+  assert(html.indexOf('class="rows"') !== -1, 'idle zone renders its program section');
   // Garden Beds has no smart-watering switch of its own, so that button is not
   // rendered at all rather than rendered disabled.
   assert(html.indexOf('data-act="smart"') === -1, 'quick action omitted when no backing entity');
-  assert(body(html).indexOf('disabled') === -1, 'no disabled placeholder button is left behind');
+  // Match the attribute form only — "1 disabled program" is legitimate copy now.
+  assert(!/\sdisabled>/.test(body(html)),
+         'no disabled placeholder button is left behind');
   assert(html.indexOf('data-act="rain"') !== -1, 'quick action kept when its entity resolves');
-  assert(html.indexOf('Program A') !== -1 && html.indexOf('Program B') !== -1,
-         'idle zone lists both programs targeting its station');
+  assert(html.indexOf('Program A') !== -1, 'the enabled program renders inline');
+  assert(html.indexOf('Program B') === -1, 'disabled programs are folded away by default');
+  assert(html.indexOf('1 disabled program<') !== -1, 'fold row summarises the rest');
 
   const bare = await mountZone({ entity: 'valve.garden_beds' }, makeHass({ states: (() => {
     const s = baseStates();
     s['valve.garden_beds'] = st('closed', { station: 9, zone_name: 'Garden Beds' });
     return s;
   })() }));
-  assert(bare.shadowRoot.innerHTML.indexOf('class="rows"') === -1,
-         'zone with no smart watering and no matching program renders no rows');
+  assert(bare.shadowRoot.innerHTML.indexOf('No program enabled') !== -1,
+         'a zone with no programs of its own says so rather than rendering nothing');
 
   group('4. Zone card — running');
   const running = await mountZone({ entity: 'valve.front_lawn' });
@@ -760,40 +764,160 @@ async function main() {
   assert(rejHtml.indexOf('local default only') !== -1, 'notice says the value is local only');
   assert(rej._presetLocal === true, 'and the session-only flag is set');
 
-  group('26. show_programs');
-  const withRows = await mountZone({ entity: 'valve.front_lawn' });
-  assert(withRows.shadowRoot.innerHTML.indexOf('class="rows"') !== -1,
-         'programs block rendered by default');
-  assert(withRows._config.show_programs === true, 'defaults to true');
+  group('26. v4 program section — fold, neutral state, single selection');
 
-  const noRows = await mountZone({ entity: 'valve.front_lawn', show_programs: false });
-  const noRowsHtml = noRows.shadowRoot.innerHTML;
-  assert(noRowsHtml.indexOf('class="rows"') === -1, 'block omitted when false');
-  // The quick-action button keeps title="Smart watering", so match the row itself.
-  assert(noRowsHtml.indexOf('<div class="primary">Smart watering</div>') === -1,
-         'smart watering row not in the DOM');
-  assert(noRowsHtml.indexOf('Program A') === -1, 'program rows not in the DOM');
-  assert(body(noRowsHtml).indexOf('display: none') === -1 &&
-         body(noRowsHtml).indexOf('hidden') === -1,
-         'omitted from the DOM, not hidden with CSS');
-  // Everything else still renders.
-  assert(noRowsHtml.indexOf('Hub online') !== -1, 'chip row unaffected');
-  assert(noRowsHtml.indexOf('data-act="stop"') !== -1, 'controls unaffected');
+  // Explicit program_entities bypass discovery, so each case gets exactly the
+  // program set it needs.
+  const P = n => 'switch.bhyve_xr_' + n + '_program';
+  const progStates = (onLetter, letters) => {
+    const x = baseStates();
+    x['binary_sensor.bhyve_xr_fault'] = st('off', { station_faults: [] });
+    x['valve.garden_beds'] = st('closed', { station: 2, zone_name: 'Garden Beds' });
+    letters.forEach((L, i) => {
+      x[P(L)] = st(L === onLetter ? 'on' : 'off', {
+        friendly_name: 'Program ' + L.toUpperCase(),
+        frequency: { days: [1, 3, 5] }, start_times: ['06:0' + i],
+        run_times: [{ station: 2, run_time: 10 }],
+      });
+    });
+    return x;
+  };
+  const EIGHT = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const mountProgs = (onLetter, letters, extra) => mountZone(
+    Object.assign({ entity: 'valve.garden_beds',
+                    program_entities: letters.map(P) }, extra || {}),
+    makeHass({ states: progStates(onLetter, letters) }));
 
-  const zoneEd = new (customElements.get('bhyve-zone-card-editor'))();
-  zoneEd.setConfig({ entity: 'valve.front_lawn' });
-  zoneEd.hass = makeHass();
-  const schema = zoneEd._schema().map(f => f.name);
-  assert(schema.indexOf('show_programs') !== -1, 'exposed in the visual editor schema');
-  assert(zoneEd._schema().find(f => f.name === 'show_programs')
-           .selector.boolean !== undefined, 'rendered as a boolean toggle');
-  assert(zoneEd._computeLabel({ name: 'show_programs' }) !== 'show_programs',
-         'has a human-readable editor label');
+  // ── default collapsed ──────────────────────────────────────────────────
+  const eight = await mountProgs('a', EIGHT);
+  let h = eight.shadowRoot.innerHTML;
+  assert(eight._programsOpen !== true, 'fold starts collapsed');
+  assert(h.indexOf('Program A') !== -1, 'the enabled program is shown');
+  assert(h.indexOf('Program B') === -1 && h.indexOf('Program H') === -1,
+         'disabled programs are not in the DOM while collapsed');
+  assert(h.indexOf('7 disabled programs') !== -1, 'fold counts the rest');
+  assert(h.indexOf('Hide 7') === -1, 'collapsed copy has no "Hide" prefix');
+  assert(h.indexOf('prog-on') !== -1, 'the enabled row carries the accent fill');
+  assert(h.indexOf('mdi:chevron-down') !== -1, 'chevron points down when collapsed');
+  // Three rows max by default: smart watering, the enabled program, the fold.
+  assert((h.match(/class="row"/g) || []).length +
+         (h.match(/class="row prog-on"/g) || []).length === 2,
+         'only two program-area rows before the fold button');
 
-  group('23. Dark-theme chip contrast');
-  assert(code.indexOf('--bh-chip:    color-mix(in srgb, var(--primary-text-color)') !== -1,
-         'neutral chip fill derives from the text colour, so it inverts with the theme');
-  assert(/--bh-chip:\s+rgba\(/.test(code), 'a static rgba fallback precedes the color-mix value');
+  // ── expanding ──────────────────────────────────────────────────────────
+  eight.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'programs-fold').click();
+  h = eight.shadowRoot.innerHTML;
+  assert(eight._programsOpen === true, 'fold opens on click');
+  assert(h.indexOf('Hide 7 disabled programs') !== -1, 'expanded copy adds "Hide"');
+  assert(h.indexOf('Program B') !== -1 && h.indexOf('Program H') !== -1,
+         'every disabled program renders when expanded');
+  assert(h.indexOf('mdi:chevron-up') !== -1, 'chevron flips when expanded');
+  eight.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'programs-fold').click();
+  assert(eight._programsOpen === false, 'clicking again collapses it');
+
+  // ── singular copy ──────────────────────────────────────────────────────
+  const twoProgs = await mountProgs('a', ['a', 'b']);
+  assert(twoProgs.shadowRoot.innerHTML.indexOf('1 disabled program<') !== -1,
+         'singular copy for one disabled program');
+  assert(twoProgs.shadowRoot.innerHTML.indexOf('1 disabled programs') === -1,
+         'no plural "s" on a count of one');
+  twoProgs.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'programs-fold').click();
+  assert(twoProgs.shadowRoot.innerHTML.indexOf('Hide 1 disabled program<') !== -1,
+         'singular copy keeps the Hide prefix');
+
+  // ── zero disabled — no fold row at all ─────────────────────────────────
+  const oneProg = await mountProgs('a', ['a']);
+  const oneHtml = oneProg.shadowRoot.innerHTML;
+  assert(oneHtml.indexOf('disabled program') === -1, 'no "0 disabled programs" row');
+  assert(oneHtml.indexOf('data-act="programs-fold"') === -1, 'fold row omitted entirely');
+  assert(oneHtml.indexOf('Program A') !== -1, 'the enabled program still shows');
+
+  // ── no program enabled ─────────────────────────────────────────────────
+  const none = await mountProgs(null, ['a', 'b', 'c']);
+  const noneHtml = none.shadowRoot.innerHTML;
+  assert(noneHtml.indexOf('No program enabled') !== -1, 'neutral row rendered');
+  assert(noneHtml.indexOf('This zone only waters when you run it manually') !== -1,
+         'exact subtitle copy');
+  assert(noneHtml.indexOf('mdi:calendar-remove') !== -1, 'event_busy-equivalent icon');
+  assert(noneHtml.indexOf('3 disabled programs') !== -1,
+         'fold counts every program when none is enabled');
+  assert(body(noneHtml).indexOf('prog-on') === -1, 'no row carries the enabled fill');
+  // The neutral row has no switch of its own.
+  const noneRow = noneHtml.slice(noneHtml.indexOf('No program enabled'));
+  assert(noneRow.slice(0, noneRow.indexOf('</div>\n          </div>')).indexOf('class="sw') === -1,
+         'neutral row has no switch control');
+  assert(body(noneHtml).indexOf(RGB_RED_HINT) === -1, 'neutral state is not warning-coloured');
+
+  // ── single selection: exact service-call pairing ───────────────────────
+  const selHass = makeHass({ states: progStates('a', ['a', 'b', 'c', 'd']) });
+  const sel = await mountZone({ entity: 'valve.garden_beds',
+    program_entities: ['a', 'b', 'c', 'd'].map(P) }, selHass);
+  sel._programsOpen = true; sel._render();
+  sel.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'program' && e.dataset.entity === P('c')).click();
+
+  const calls = selHass.calls;
+  const forEntity = id => calls.filter(c => c.data.entity_id === id);
+  assert(forEntity(P('c')).length === 1, 'exactly one call touches Program C');
+  assert(forEntity(P('c'))[0].domain === 'switch' &&
+         forEntity(P('c'))[0].service === 'turn_on', 'Program C gets switch.turn_on');
+  assert(forEntity(P('a')).length === 1, 'exactly one call touches Program A');
+  assert(forEntity(P('a'))[0].domain === 'switch' &&
+         forEntity(P('a'))[0].service === 'turn_off', 'Program A gets switch.turn_off');
+  assert(forEntity(P('b')).length === 0, 'Program B is untouched');
+  assert(forEntity(P('d')).length === 0, 'Program D is untouched');
+  assert(calls.length === 2, 'exactly two service calls in total');
+
+  // Optimistic, and rendered before either call could resolve.
+  const selHtml = sel.shadowRoot.innerHTML;
+  assert(sel._isOn(P('c')) === true, 'tapped program reads on immediately');
+  assert(sel._isOn(P('a')) === false, 'outgoing program reads off immediately');
+  assert(selHtml.indexOf('Program C') < selHtml.indexOf('disabled program'),
+         'Program C has moved into the enabled slot above the fold');
+
+  // ── tapping the enabled program turns it off and enables nothing ───────
+  const offHass2 = makeHass({ states: progStates('a', ['a', 'b', 'c']) });
+  const offSel = await mountZone({ entity: 'valve.garden_beds',
+    program_entities: ['a', 'b', 'c'].map(P) }, offHass2);
+  offSel.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'program' && e.dataset.entity === P('a')).click();
+  assert(offHass2.calls.length === 1, 'a single call when switching the enabled one off');
+  assert(offHass2.calls[0].service === 'turn_off' &&
+         offHass2.calls[0].data.entity_id === P('a'), 'and it is turn_off on that program');
+  assert(offHass2.calls.filter(c => c.service === 'turn_on').length === 0,
+         'nothing is auto-enabled in its place');
+  assert(offSel.shadowRoot.innerHTML.indexOf('No program enabled') !== -1,
+         'the zone lands in the no-program state');
+
+  // ── Smart watering is exempt on all three counts ───────────────────────
+  const smartHass = makeHass({ states: (() => {
+    const x = progStates('a', ['a', 'b', 'c']);
+    x['switch.front_lawn_smart_watering'] = st('on', { soil_moisture_level: 61 });
+    return x; })() });
+  const smart = await mountZone({ entity: 'valve.front_lawn',
+    program_entities: ['a', 'b', 'c'].map(P),
+    smart_watering_entity: 'switch.front_lawn_smart_watering' }, smartHass);
+  let sh = smart.shadowRoot.innerHTML;
+  assert(sh.indexOf('Smart watering') !== -1, '(a) renders while the fold is collapsed');
+  assert(sh.indexOf('2 disabled programs') !== -1,
+         '(b) not counted among the disabled programs');
+  smart.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'programs-fold').click();
+  assert(smart.shadowRoot.innerHTML.indexOf('Smart watering') !== -1,
+         '(a) still renders while expanded');
+  smartHass.calls.length = 0;
+  smart.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'toggle' &&
+               e.dataset.entity === 'switch.front_lawn_smart_watering').click();
+  assert(smartHass.calls.length === 1, '(c) tapping it makes exactly one call');
+  assert(smartHass.calls[0].data.entity_id === 'switch.front_lawn_smart_watering',
+         '(c) and only touches its own entity');
+  assert(smartHass.calls.filter(c => String(c.data.entity_id).indexOf('_program') !== -1)
+         .length === 0, '(c) no program entity is touched by the smart watering toggle');
+  assert(smart._isOn(P('a')) === true, '(c) the enabled program is unaffected');
 
   group('27. show_programs — controller card');
   const drawerOn = await mountController({});
@@ -848,10 +972,12 @@ async function main() {
   const unbound = ctrlEd._computeLabel;
   assert(unbound({ name: 'show_programs' }) === 'Show programs & settings',
          'label lookup works unbound');
+  // v4 retired the zone card's own show_programs; the controller keeps its.
   const zoneEd2 = new (customElements.get('bhyve-zone-card-editor'))();
-  assert(zoneEd2._computeLabel({ name: 'show_programs' }) ===
-         'Show smart watering and programs',
-         'zone card keeps its own wording for the same key');
+  assert(zoneEd2._schema().map(f => f.name).indexOf('show_programs') === -1,
+         'zone editor no longer offers show_programs');
+  assert(code.indexOf("show_programs: 'Show smart watering and programs'") === -1,
+         'the zone-specific label is gone with it');
 
   // ── Summary ──────────────────────────────────────────────────────────────
   process.stdout.write('\n-----------------------------------------\n');
