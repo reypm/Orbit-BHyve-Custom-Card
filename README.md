@@ -94,6 +94,7 @@ type: custom:bhyve-controller-card
 title: Front Yard          # optional — defaults to the device name
 device_id: abc123…         # optional — defaults to the first B-hyve device found
 show_actions: true         # optional — default true
+show_programs: true        # optional — default true
 ```
 
 <img src="docs/controller-card.png" width="380"
@@ -121,6 +122,13 @@ expanded:
 `show_actions: false` hides the Run/Stop buttons and the drawer, giving a read-only
 overview. The Auto/Off control stays.
 
+`show_programs: false` drops the drawer on its own — the merged program list, the rain
+delay row, the run time stepper, and the show/hide row that opens them — while leaving the
+Run/Stop buttons in place. Use it when the programs live on one dashboard card and you want
+the others to stay compact. The section is not rendered at all, not hidden with CSS, so
+there is nothing left to expand. Setting either option to `false` is enough to remove the
+drawer.
+
 ### The Off state
 
 Switching the device to **Off** swaps the status for an orange banner, since no program
@@ -136,6 +144,7 @@ on the controller at once.
 | `title` | string | device name | Header title |
 | `device_id` | string | first B-hyve device | From the device registry |
 | `show_actions` | bool | `true` | Run/Stop buttons and the drawer |
+| `show_programs` | bool | `true` | Set `false` to omit the whole programs & settings drawer, its show/hide row included |
 | `run_time` | number | `10` | Starting value for the run-time stepper |
 | `zones` | list | discovered | Explicit list of zone valve entities |
 | `device_mode_entity` | string | discovered | `select.*_device_mode` |
@@ -252,8 +261,10 @@ layout instead: a home icon (blue when dry, red when wet), `Dry` or
 
 Both cards have visual editors. The controller editor offers title, device picker
 (filtered to the B-hyve integration) and the actions toggle; the zone editor offers the
-entity picker, name, run time and the **Show smart watering and programs** toggle. The
-entity overrides in the tables above are YAML-only for now — the editors note this inline.
+entity picker, name, run time and the **Show smart watering and programs** toggle. Both
+cards expose a `show_programs` toggle, worded for what each one actually hides — **Show
+programs & settings** on the controller card. The entity overrides in the tables above are
+YAML-only for now — the editors note this inline.
 
 ---
 
