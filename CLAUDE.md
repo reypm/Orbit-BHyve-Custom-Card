@@ -87,8 +87,11 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
   `_selectProgram()` issues `switch.turn_on` for the tapped entity and `switch.turn_off` for
   the outgoing one in the same handler, setting optimistic state for both before either call
   is dispatched. Smart watering is deliberately outside this group and keeps its own
-  `_toggle()` path. `show_programs` was retired on the zone card in v4 (the section folds
-  itself); the controller card's option of the same name is unrelated and still live.
+  `_toggle()` path. The zone card's v3 `show_programs` was retired in v4 and deliberately not
+  reused: `show_smart_watering_and_programs` hides the whole section, while the fold inside
+  a shown section is not configurable. The controller card's `show_programs` is unrelated
+  and still live. Every boolean option in this codebase is `show_*`, positive polarity,
+  default true, read via `!== false` — keep it that way.
 - **Optimistic UI:** `_pendingOn` / `_pendingOff` sets, cleared when HA confirms or on a
   timeout. `_isOn()` checks them before HA state; `open` → true for valves.
 - **Live countdown:** recomputed from `started_watering_station_at` plus the run minutes,

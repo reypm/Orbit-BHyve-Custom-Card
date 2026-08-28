@@ -230,9 +230,28 @@ If the B-hyve app has left two programs on, the card shows the first as enabled 
 the other in the fold still reading on, rather than silently correcting a change you made
 elsewhere.
 
-This behaviour is not configurable — the section is short enough by default that an outer
-show/hide would be redundant. (The controller card's separate `show_programs` option is
-unaffected.)
+#### Hiding the section vs. the fold
+
+These are two different things, on two different axes:
+
+- **`show_smart_watering_and_programs: false`** hides the section *entirely* — smart
+  watering, the enabled program, the neutral row and the fold all go, and nothing is
+  rendered in their place.
+- **The fold within a shown section is not configurable.** Whenever the section is
+  displayed it always uses the behaviour above: disabled programs collapse by default,
+  and there is no way to force the old always-show-everything layout back.
+
+```yaml
+type: custom:bhyve-zone-card
+entity: valve.front_lawn
+show_smart_watering_and_programs: false
+```
+
+> **Upgrading from v3.1/v3.2?** The zone card's old `show_programs` option did roughly what
+> `show_smart_watering_and_programs` does now, but it is **gone**, not renamed — a leftover
+> `show_programs: false` on a zone card is ignored. It was given a new name deliberately, so
+> an old config can't silently keep working with subtly different behaviour. The controller
+> card's `show_programs` is a separate option and is unaffected.
 
 ### The chip row
 
@@ -257,6 +276,7 @@ in v2 and is fixed here.
 | `entity` | string | **required** | The zone valve, or a flood-sensor `binary_sensor` |
 | `name` | string | zone name | Display name |
 | `run_time` | number | `10` | Minutes for the Run button |
+| `show_smart_watering_and_programs` | bool | `true` | Set `false` to omit the whole smart-watering and programs section. See the note below — this is not the same as the fold |
 | `hub_entity` | string | discovered | `binary_sensor.*_connected` |
 | `battery_entity` | string | discovered | `sensor.*_battery_level` |
 | `history_entity` | string | discovered | `sensor.*_zone_history` |

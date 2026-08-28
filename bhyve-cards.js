@@ -864,7 +864,8 @@
       if (!config || !config.entity) {
         throw new Error('[bhyve-zone-card] "entity" is required (the zone valve).');
       }
-      this._config = Object.assign({ run_time: 10 }, config);
+      this._config = Object.assign(
+        { run_time: 10, show_smart_watering_and_programs: true }, config);
       if (this._hass) this._render();
     }
 
@@ -1049,6 +1050,12 @@
     // at a time. The section shows Smart watering, the one enabled program (or
     // a neutral row saying there is none), and folds the rest away.
     _rows(r) {
+      // Whether the section appears at all. Deliberately not named
+      // `show_programs`: that key shipped in v3.1/v3.2 with these semantics and
+      // was removed in v4, so reusing it would silently revive the old meaning
+      // for anyone whose config still carries it. This is the only axis left —
+      // when the section is shown it always uses the v4 fold.
+      if (this._config.show_smart_watering_and_programs === false) return '';
       const rows = [];
 
       // Smart watering is exempt from all of it — it adjusts whatever schedule
@@ -1581,6 +1588,7 @@
     title:        'Title (defaults to the device name)',
     device_id:    'B-hyve device',
     show_actions: 'Show Run/Stop buttons and the settings drawer',
+    show_smart_watering_and_programs: 'Show smart watering and programs',
     entity:       'Zone valve (or flood sensor)',
     name:         'Name override',
     run_time:     'Run time (minutes)',
@@ -1672,6 +1680,7 @@
         { name: 'name',     selector: { text: {} } },
         { name: 'run_time', selector: { number: { min: 1, max: 60, mode: 'box',
                                                   unit_of_measurement: 'min' } } },
+        { name: 'show_smart_watering_and_programs', selector: { boolean: {} } },
       ];
     }
     _hint() {

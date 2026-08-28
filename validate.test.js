@@ -979,6 +979,96 @@ async function main() {
   assert(code.indexOf("show_programs: 'Show smart watering and programs'") === -1,
          'the zone-specific label is gone with it');
 
+  group('28. show_smart_watering_and_programs (zone card)');
+
+  // Unset and explicitly true both render the v4 section as normal.
+  const secDefault = await mountProgs('a', ['a', 'b', 'c']);
+  const secDefHtml = secDefault.shadowRoot.innerHTML;
+  assert(secDefault._config.show_smart_watering_and_programs === true, 'defaults to true');
+  assert(secDefHtml.indexOf('class="rows"') !== -1, 'section renders when unset');
+  assert(secDefHtml.indexOf('2 disabled programs') !== -1,
+         'and still uses the v4 fold, collapsed by default');
+
+  const secTrue = await mountProgs('a', ['a', 'b', 'c'],
+    { show_smart_watering_and_programs: true });
+  assert(secTrue.shadowRoot.innerHTML.indexOf('class="rows"') !== -1,
+         'section renders when explicitly true');
+
+  // ── false: the whole block goes, in every v4 state ─────────────────────
+  const assertHidden = (card, label) => {
+    const h = card.shadowRoot.innerHTML;
+    const b = body(h);
+    assert(b.indexOf('class="rows"') === -1, label + ': rows container absent');
+    assert(b.indexOf('rows-divider') === -1, label + ': divider absent');
+    assert(h.indexOf('<div class="primary">Smart watering</div>') === -1,
+           label + ': smart watering row absent');
+    assert(h.indexOf('Program A') === -1, label + ': program rows absent');
+    assert(h.indexOf('disabled program') === -1, label + ': fold row absent');
+    assert(h.indexOf('No program enabled') === -1, label + ': neutral row absent');
+    assert(h.indexOf('data-act="program"') === -1, label + ': no program handlers');
+    assert(h.indexOf('data-act="programs-fold"') === -1, label + ': no fold handler');
+    assert(b.indexOf('display: none') === -1 && b.indexOf('hidden') === -1,
+           label + ': omitted from the DOM, not hidden with CSS');
+  };
+
+  // (1) a program enabled
+  assertHidden(await mountProgs('a', ['a', 'b', 'c'],
+    { show_smart_watering_and_programs: false }), 'enabled-program state');
+
+  // (2) no program enabled — the neutral row must go too, not just the normal case
+  assertHidden(await mountProgs(null, ['a', 'b', 'c'],
+    { show_smart_watering_and_programs: false }), 'no-program-enabled state');
+
+  // (3) with a smart-watering entity present, which is otherwise always visible
+  const hiddenSmart = await mountZone({ entity: 'valve.front_lawn',
+    program_entities: ['a', 'b', 'c'].map(P),
+    smart_watering_entity: 'switch.front_lawn_smart_watering',
+    show_smart_watering_and_programs: false },
+    makeHass({ states: (() => {
+      const x = progStates('a', ['a', 'b', 'c']);
+      x['switch.front_lawn_smart_watering'] = st('on', { soil_moisture_level: 61 });
+      return x; })() }));
+  assertHidden(hiddenSmart, 'smart-watering-present state');
+
+  // (4) mid-selection: a selection made before hiding leaves nothing behind
+  const midHass = makeHass({ states: progStates('a', ['a', 'b', 'c']) });
+  const mid = await mountZone({ entity: 'valve.garden_beds',
+    program_entities: ['a', 'b', 'c'].map(P) }, midHass);
+  mid._programsOpen = true; mid._render();
+  mid.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'program' && e.dataset.entity === P('c')).click();
+  assert(mid._isOn(P('c')) === true, 'selection applied while the section was visible');
+  mid.setConfig({ entity: 'valve.garden_beds',
+                  program_entities: ['a', 'b', 'c'].map(P),
+                  show_smart_watering_and_programs: false });
+  mid._render();
+  assertHidden(mid, 'mid-selection state');
+  assert(mid._isOn(P('c')) === true, 'the optimistic selection survives hiding the section');
+
+  // Everything outside the section is untouched.
+  const outside = await mountProgs('a', ['a', 'b', 'c'],
+    { show_smart_watering_and_programs: false });
+  const oHtml = outside.shadowRoot.innerHTML;
+  assert(oHtml.indexOf('class="chips"') !== -1, 'chip row unaffected');
+  assert(oHtml.indexOf('data-act="run"') !== -1, 'Run button unaffected');
+  assert(oHtml.indexOf('Idle · station 2') !== -1, 'header unaffected');
+
+  // ── editor surface ─────────────────────────────────────────────────────
+  const zEd = new (customElements.get('bhyve-zone-card-editor'))();
+  zEd.setConfig({ entity: 'valve.front_lawn' });
+  zEd.hass = makeHass();
+  const zNames = zEd._schema().map(f => f.name);
+  assert(zNames.indexOf('show_smart_watering_and_programs') !== -1,
+         'exposed in the zone editor schema');
+  assert(zEd._schema().find(f => f.name === 'show_smart_watering_and_programs')
+           .selector.boolean !== undefined, 'rendered as a boolean toggle');
+  assert(zEd._computeLabel({ name: 'show_smart_watering_and_programs' }) ===
+         'Show smart watering and programs', 'has a human-readable label');
+  assert(zNames.indexOf('show_programs') === -1,
+         'the retired v3 key is not resurrected alongside it');
+  // Naming convention: every boolean option is show_*, positive, default true.
+  assert(code.indexOf('hide_') === -1, 'no negative-polarity option was introduced');
+
   // ── Summary ──────────────────────────────────────────────────────────────
   process.stdout.write('\n-----------------------------------------\n');
   process.stdout.write('Results: ' + passed + ' passed, ' + failed + ' failed\n');
