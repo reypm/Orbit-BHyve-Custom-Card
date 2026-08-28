@@ -21,7 +21,20 @@ jobs:
           node-version: "20"
 
       - name: Check JavaScript syntax
-        run: node --check bhyve-sprinkler-card.js
+        # Globbed rather than named: v3 renamed the card file and this step kept
+        # pointing at the old name, so CI failed on a file that no longer existed.
+        run: |
+          shopt -s nullglob
+          found=0
+          for f in *.js; do
+            echo "node --check $f"
+            node --check "$f"
+            found=1
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No JavaScript files found at the repository root" >&2
+            exit 1
+          fi
 
       - name: Run unit tests
         run: node validate.test.js
