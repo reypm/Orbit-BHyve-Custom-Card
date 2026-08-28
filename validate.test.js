@@ -276,6 +276,11 @@ async function main() {
   // Garden Beds is station 2, which programs A and B both target, so its
   // program rows render inline.
   assert(html.indexOf('class="rows"') !== -1, 'idle zone renders its programs inline');
+  // Garden Beds has no smart-watering switch of its own, so that button is not
+  // rendered at all rather than rendered disabled.
+  assert(html.indexOf('data-act="smart"') === -1, 'quick action omitted when no backing entity');
+  assert(body(html).indexOf('disabled') === -1, 'no disabled placeholder button is left behind');
+  assert(html.indexOf('data-act="rain"') !== -1, 'quick action kept when its entity resolves');
   assert(html.indexOf('Program A') !== -1 && html.indexOf('Program B') !== -1,
          'idle zone lists both programs targeting its station');
 
@@ -294,6 +299,8 @@ async function main() {
   assert(html.indexOf('data-act="stop"') !== -1, 'running shows Stop button');
   assert(html.indexOf('class="bar"') !== -1, 'running shows progress bar');
   assert(html.indexOf('Smart watering') !== -1, 'running renders smart watering row inline');
+  assert(html.indexOf('data-act="smart"') !== -1, 'smart quick action rendered when resolved');
+  assert(html.indexOf('data-act="rain"') !== -1, 'rain quick action rendered when resolved');
   assert(html.indexOf('Soil moisture 61%') !== -1, 'smart watering row shows soil moisture');
   assert(html.indexOf('class="rows"') !== -1, 'collapsed content renders inline, no expander');
   assert(html.indexOf('data-act="drawer"') === -1, 'zone card has no drawer toggle');
@@ -307,7 +314,8 @@ async function main() {
   assert(html.indexOf('accent-red') !== -1, 'fault card is red-accented');
   assert(html.indexOf('Fault · will not run') !== -1, 'fault subtitle');
   assert(html.indexOf('class="banner red"') !== -1, 'fault renders warning banner');
-  assert(html.indexOf('short circuit') !== -1, 'banner has human-readable fault text');
+  assert(html.indexOf('reports a short circuit') !== -1, 'fault copy carries the article');
+  assert(html.indexOf('reports short circuit') === -1, 'no article-less fault copy');
   assert(html.indexOf('Station 3') !== -1, 'banner names the faulted station');
   assert(html.indexOf('Run blocked') !== -1, 'Run replaced by "Run blocked"');
   assert(html.indexOf('mdi:cancel') !== -1, 'blocked button uses no-entry icon');
@@ -406,6 +414,55 @@ async function main() {
   assert(html.indexOf('data-act="more-info"') !== -1, 'zone row name opens more-info');
   assert(html.indexOf('Fault detected') !== -1, 'status reflects the device fault');
 
+  // Rows follow the controller's station numbering, not entity_id order.
+  const rowOrder = (drawerHtml => {
+    const out = []; const re = /data-act="more-info" data-entity="([^"]+)"/g; let m;
+    while ((m = re.exec(drawerHtml))) out.push(m[1]);
+    return out;
+  })(html);
+  assert(rowOrder.join(',') ===
+    'valve.front_lawn,valve.garden_beds,valve.side_strip,valve.back_lawn',
+    'zone rows sorted by station number, not alphabetically');
+  assert(rowOrder[0] === 'valve.front_lawn', 'station 1 first (alphabetical would be back_lawn)');
+
+  // Status counts running zones rather than naming one.
+  const noFault = s => { s['binary_sensor.bhyve_xr_fault'] = st('off', { station_faults: [] }); };
+  const one = await mountController({}, makeHass({ states: (() => {
+    const x = baseStates(); noFault(x); return x; })() }));
+  assert(one.shadowRoot.innerHTML.indexOf('1 zone watering') !== -1,
+    'single running zone reads "1 zone watering"');
+  const headStatus = h => {
+    const m = /class="row head"[\s\S]*?<div class="secondary">([^<]*)</.exec(h);
+    return m ? m[1] : '';
+  };
+  assert(headStatus(one.shadowRoot.innerHTML).indexOf('Front Lawn') === -1,
+    'header status is not the running zone name');
+  assert(/\d+ zones? watering$/.test(headStatus(one.shadowRoot.innerHTML)),
+    'header status ends with the watering count');
+
+  const two = await mountController({}, makeHass({ states: (() => {
+    const x = baseStates(); noFault(x);
+    x['valve.garden_beds'] = st('open', { station: 2, zone_name: 'Garden Beds',
+      manual_preset_runtime: 10,
+      started_watering_station_at: new Date(NOW - 60000).toISOString() });
+    return x; })() }));
+  assert(two.shadowRoot.innerHTML.indexOf('2 zones watering') !== -1,
+    'two running zones read "2 zones watering"');
+
+  group('11b. Controller — device Off');
+  const offHass = makeHass({ states: (() => {
+    const x = baseStates(); noFault(x);
+    x['select.bhyve_xr_device_mode'] = st('off', { options: ['auto', 'off'] });
+    x['valve.front_lawn'] = st('closed', { station: 1, zone_name: 'Front Lawn' });
+    return x; })() });
+  const offCard = await mountController({}, offHass);
+  const offHtml = offCard.shadowRoot.innerHTML;
+  assert(offHtml.indexOf('Controller is off') !== -1, 'off shows the orange banner');
+  assert(offHtml.indexOf('class="banner orange"') !== -1, 'banner uses the orange treatment');
+  assert((offHtml.match(/>Off</g) || []).length >= 2,
+    'zone rows read "Off" while the device mode is off');
+  assert(offHtml.indexOf('>Idle<') === -1, 'no zone row still reads "Idle" when off');
+
   group('12. Controller drawer toggle');
   const drawer = await mountController({});
   assert(drawer._expanded === false, 'drawer closed by default');
@@ -437,6 +494,11 @@ async function main() {
   assert(html.indexOf('Program E') !== -1, 'lists program E');
   assert(html.indexOf('Mon, Wed, Fri · 06:00') !== -1, 'program shows day + time schedule');
   assert(html.indexOf('Every 4 days · 04:15') !== -1, 'interval schedule rendered');
+  assert(html.indexOf('Every 4 days · 04:15 · 25 min') !== -1,
+    'drawer program row includes its run time');
+  assert(html.indexOf('Mon, Wed, Fri · 06:00 · 8\u201310 min') !== -1,
+    'run time spanning zones shown as a range');
+  assert(html.indexOf('Weather adjusted · 12 min') !== -1, 'smart program run time shown');
   assert(html.indexOf('mdi:brain') !== -1, 'smart program uses the brain icon');
   assert(html.indexOf('mdi:calendar-month') !== -1, 'ordinary program uses the calendar icon');
   assert(html.indexOf('3 programs · rain delay · run time') !== -1, 'drawer hint counts programs');
@@ -569,19 +631,29 @@ async function main() {
   const xssCtrl = await mountController({ title: '<b>bold</b>' });
   assert(xssCtrl.shadowRoot.innerHTML.indexOf('<b>bold</b>') === -1, 'controller title is escaped');
 
-  group('22. Mushroom dependency notice');
+  group('22. Mushroom is a soft dependency, with no detection probe');
+  // The probe used to read --mush-rgb-blue, which Mushroom only ever reads and
+  // never sets, so the "not installed" banner fired for almost everyone.
+  assert(code.indexOf('--mush-rgb-blue') === -1 || code.indexOf('getPropertyValue') === -1,
+         'no getComputedStyle probe for --mush-rgb-blue remains');
+  assert(code.indexOf('_mushroomMissing') === -1, '_mushroomMissing() removed');
+  assert(code.indexOf('Mushroom is not installed') === -1, 'warning banner copy removed');
+  assert(code.indexOf('dismiss-notice') === -1, 'dismiss handler removed');
   const realGCS = global.getComputedStyle;
   global.getComputedStyle = () => ({ getPropertyValue: () => '' });
-  const degraded = await mountZone({ entity: 'valve.garden_beds' });
-  html = degraded.shadowRoot.innerHTML;
-  assert(html.indexOf('Mushroom is not installed') !== -1, 'notice shown when tokens are missing');
-  assert(html.indexOf('Idle · station 2') !== -1, 'card still renders rather than refusing');
-  const dismiss = degraded.shadowRoot.querySelector('.dismiss-notice');
-  assert(!!dismiss, 'notice is dismissible');
-  dismiss.click();
-  assert(degraded.shadowRoot.innerHTML.indexOf('Mushroom is not installed') === -1,
-         'dismissing hides the notice');
+  const noTokens = await mountZone({ entity: 'valve.garden_beds' });
+  const noTokensHtml = noTokens.shadowRoot.innerHTML;
+  assert(noTokensHtml.indexOf('Mushroom') === -1, 'nothing about Mushroom is rendered');
+  assert(noTokensHtml.indexOf('Idle · station 2') !== -1,
+         'card renders normally without the tokens');
   global.getComputedStyle = realGCS;
+  // The fallbacks are Mushroom's own --default-* values, which is what makes the
+  // probe unnecessary.
+  [['blue','33, 150, 243'],['green','76, 175, 80'],['orange','255, 152, 0'],
+   ['red','244, 67, 54'],['purple','146, 107, 199'],['grey','158, 158, 158']]
+    .forEach(([name, rgb]) => assert(
+      code.indexOf('var(--mush-rgb-' + name + ', ' + rgb + ')') !== -1,
+      name + ' falls back to Mushroom\'s own default ' + rgb));
 
   group('23. Dark-theme chip contrast');
   assert(code.indexOf('--bh-chip:    color-mix(in srgb, var(--primary-text-color)') !== -1,

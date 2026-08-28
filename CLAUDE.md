@@ -56,9 +56,11 @@ node validate.test.js
 `validate.test.js` is headless: it stubs browser globals, `eval`s the card file, then
 mounts both cards against a fake device/entity registry. The DOM stub parses rendered
 tags, so tests dispatch real clicks at handles and exercise the actual event handlers.
-141 assertions across 23 groups cover the zone card's four states, chip order and each
+168 assertions across 24 groups cover the zone card's four states, chip order and each
 chip's visibility rule, the drawer toggle, the run-time stepper's fallback, the merged
-programs list, service-call payloads, flood sensors, the empty state, and XSS escaping.
+programs list with per-zone run times, station-order zone sorting, the device-Off state,
+omitted quick-action buttons, service-call payloads, flood sensors, the empty state, and
+XSS escaping.
 
 **Run the test suite before opening a PR. Add assertions for any logic you change.**
 
@@ -75,8 +77,10 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
   on a 1s tick that only runs while a zone is watering.
 - **XSS safety:** every user-controlled string goes through `esc()` before interpolation.
   Test group 21 covers it.
-- **Mushroom detection:** `--mush-rgb-blue` is probed at render; if absent the cards show
-  a dismissible notice and render with fallback colours rather than refusing to load.
+- **Mushroom is a soft dependency, deliberately undetected.** Every `RGB` fallback equals
+  Mushroom's own `--default-*` value, so the cards look right with or without it, and pick
+  up a theme's `--mush-rgb-*` overrides when they exist. There is no detection probe — see
+  DESIGN_DECISIONS.md for why one must not be re-added.
 - **Dark theme:** neutral surfaces use `color-mix` against `--primary-text-color`, which
   inverts with the theme, so chips never collapse to grey-on-grey.
 

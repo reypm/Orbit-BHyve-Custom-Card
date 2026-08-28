@@ -55,3 +55,30 @@ Mushroom's default palette, for reference:
 red 244,67,54   purple 146,107,199   blue 33,150,243   light-blue 3,169,244
 green 76,175,80   amber 255,193,7   orange 255,152,0   grey 158,158,158
 ```
+
+---
+
+## 9. The Mushroom detection probe — removed, not fixed
+
+**What it did.** Early v3 probed
+`getComputedStyle(document.documentElement).getPropertyValue('--mush-rgb-blue')` at render
+time and, when it came back empty, showed a dismissible banner reading "Mushroom is not
+installed. These cards render, but with degraded colours."
+
+**Why it was wrong.** `--mush-rgb-*` is an override hook that Mushroom only ever *reads* —
+see the note above. On a completely normal Mushroom install nothing sets it, so the probe
+came back empty and the banner fired for virtually every user, including those with
+Mushroom correctly installed. Both of its claims were false: Mushroom was usually present,
+and the colours were not degraded.
+
+**Why it was removed rather than corrected.** A correct probe is possible — mount a
+throwaway Mushroom element and read `--rgb-blue` off its shadow root — but it would be
+detecting something that no longer matters. The fallbacks are byte-identical to Mushroom's
+`--default-*` palette, so a card without Mushroom renders exactly as intended. There is
+nothing left for the warning to warn about, and a probe that exists only to render a
+no-op notice is pure liability.
+
+**Do not re-add one.** If a future change makes the cards genuinely depend on something
+Mushroom provides, state that dependency in the README and fail visibly at the point of
+use — do not reintroduce a global "is Mushroom installed?" heuristic. `--mush-rgb-*` in
+particular can never answer that question.

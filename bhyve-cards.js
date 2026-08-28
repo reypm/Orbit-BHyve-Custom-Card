@@ -63,7 +63,6 @@
     chart:      'mdi:chart-bar',
     clock:      'mdi:clock-outline',
     thermo:     'mdi:thermometer',
-    info:       'mdi:information-outline',
   };
 
   // ---------------------------------------------------------------------------
@@ -91,6 +90,9 @@
       --bh-divider: color-mix(in srgb, var(--primary-text-color) 12%, transparent);
       border-radius: var(--ha-card-border-radius, 12px);
       overflow: hidden;
+      /* Lets the rules below react to the card's own width rather than the
+         viewport's, since a card can be narrow on a wide screen. */
+      container-type: inline-size;
       font-family: var(--mush-font-family, var(--primary-font-family, sans-serif));
     }
     ha-card.accent-red { box-shadow: 0 0 0 1px rgba(${RGB.red}, .45); }
@@ -190,14 +192,6 @@
     .banner ha-icon { --mdc-icon-size: 20px; flex: 0 0 auto; }
     .banner.red    { background: rgba(${RGB.red}, .14);    color: rgb(${RGB.red}); }
     .banner.orange { background: rgba(${RGB.orange}, .16); color: rgb(${RGB.orange}); }
-    .banner.note {
-      background: var(--bh-shape); color: var(--secondary-text-color);
-      align-items: flex-start;
-    }
-    .banner.note button {
-      color: var(--secondary-text-color); flex: 0 0 auto; margin-left: auto;
-    }
-    .banner.note a { color: rgb(${RGB.accent}); }
 
     /* ── Empty state ─────────────────────────────────────────────────── */
     .empty {
@@ -281,6 +275,14 @@
     .stepper .val {
       min-width: 52px; text-align: center; font-size: 13px; font-weight: 500;
       color: var(--primary-text-color); font-variant-numeric: tabular-nums;
+    }
+
+    /* Below roughly a phone-width card the header's "model · status" line and
+       the drawer subtitles no longer fit on one line. Wrap them instead of
+       ellipsing, so no information is lost; wider cards are unaffected. */
+    @container (max-width: 344px) {
+      .head .secondary,
+      .drawer .row .secondary { white-space: normal; }
     }
 
     .toast {
@@ -511,6 +513,19 @@
     };
   }
 
+  // Zones read in the order the controller numbers them, not alphabetically.
+  function sortByStation(hass, zoneIds) {
+    const station = id => {
+      const st = hass && hass.states ? hass.states[id] : null;
+      const n = st ? num(st.attributes.station) : null;
+      return n == null ? Number.MAX_SAFE_INTEGER : n;
+    };
+    return zoneIds.slice().sort((a, b) => {
+      const d = station(a) - station(b);
+      return d !== 0 ? d : a.localeCompare(b);
+    });
+  }
+
   function resolveDevice(hass, deviceId, cfg) {
     const c   = cfg || {};
     const ids = entitiesOfDevice(deviceId).map(e => e.entity_id);
@@ -519,7 +534,7 @@
 
     return {
       name:          c.name || (dev ? (dev.name_by_user || dev.name) : null) || 'B-hyve',
-      zones:         ids.filter(id => id.startsWith('valve.')).sort(),
+      zones:         sortByStation(hass, ids.filter(id => id.startsWith('valve.'))),
       mode:          c.device_mode_entity  || one('_device_mode', 'select'),
       nextWatering:  c.next_watering_entity || one('_next_watering', 'sensor'),
       rainDelay:     c.rain_delay_entity   || one('_rain_delay', 'switch'),
@@ -550,7 +565,6 @@
       this._pendingOff = new Set();
       this._runMinutes = {};    // entity_id → minutes we started it with
       this._tick       = null;
-      this._noticeOff  = false;
     }
 
     set hass(hass) {
@@ -704,28 +718,6 @@
       }
     }
 
-    // ── Mushroom dependency notice ───────────────────────────────
-    _mushroomMissing() {
-      if (this._noticeOff || _noticeDismissed) return false;
-      try {
-        const v = getComputedStyle(document.documentElement)
-          .getPropertyValue('--mush-rgb-blue');
-        return !String(v || '').trim();
-      } catch (e) { return false; }
-    }
-
-    _noticeHtml() {
-      return `
-        <div class="banner note">
-          <ha-icon icon="${ICON.info}"></ha-icon>
-          <div>Mushroom is not installed. These cards render, but with degraded
-          colours — install <b>lovelace-mushroom</b> via HACS for the intended look.</div>
-          <button class="dismiss-notice" title="Dismiss">
-            <ha-icon icon="mdi:close"></ha-icon>
-          </button>
-        </div>`;
-    }
-
     _emptyHtml() {
       return `
         <div class="empty">
@@ -738,15 +730,7 @@
         </div>`;
     }
 
-    _bindCommon() {
-      const btn = this.shadowRoot.querySelector('.dismiss-notice');
-      if (btn) btn.addEventListener('click', () => {
-        _noticeDismissed = true; this._noticeOff = true; this._render();
-      });
-    }
   }
-
-  let _noticeDismissed = false;
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -770,9 +754,20 @@
       : (a.start_times ? [a.start_times] : []);
     if (times.length) parts.push(times.join(', '));
 
-    if (station != null && Array.isArray(a.run_times)) {
-      const rt = a.run_times.find(r => String(r.station) === String(station));
-      if (rt && rt.run_time != null) parts.push(fmtDuration(rt.run_time));
+    if (Array.isArray(a.run_times) && a.run_times.length) {
+      if (station != null) {
+        const rt = a.run_times.find(r => String(r.station) === String(station));
+        if (rt && rt.run_time != null) parts.push(fmtDuration(rt.run_time));
+      } else {
+        // Device-level list: one figure if every zone runs the same length,
+        // otherwise the span across zones.
+        const mins = a.run_times.map(r => num(r.run_time)).filter(v => v != null);
+        if (mins.length) {
+          const lo = Math.min.apply(null, mins), hi = Math.max.apply(null, mins);
+          parts.push(lo === hi ? fmtDuration(lo)
+                               : Math.round(lo) + '\u2013' + fmtDuration(hi));
+        }
+      }
     }
     return parts.filter(Boolean).join(' · ');
   }
@@ -802,12 +797,13 @@
                     f.station == null || String(f.station) === String(station));
     if (station != null && list.length && !mine.length) return null;
 
+    const article = word => /^[aeiou]/i.test(word) ? 'an' : 'a';
     const describe = f => {
       if (f == null) return null;
       if (typeof f === 'string') return f;
       const where = f.station != null ? 'Station ' + f.station : 'This station';
-      const what  = f.fault || f.type || f.name || 'a fault';
-      return where + ' reports ' + String(what).replace(/_/g, ' ') + '.';
+      const what  = String(f.fault || f.type || f.name || 'fault').replace(/_/g, ' ');
+      return where + ' reports ' + article(what) + ' ' + what + '.';
     };
     const text = mine.map(describe).filter(Boolean).join(' ');
     return (text || 'This station reports a fault.') +
@@ -892,7 +888,6 @@
       this.shadowRoot.innerHTML = `
         <style>${BASE_STYLES}${ZONE_STYLES}</style>
         <ha-card class="${fault ? 'accent-red' : ''}">
-          ${this._mushroomMissing() ? this._noticeHtml() : ''}
           <div class="row">
             ${shapeHtml(icon, accent, 'lg')}
             <div class="grow">
@@ -1000,17 +995,18 @@
           <ha-icon icon="${ICON.play}"></ha-icon>Run ${Math.round(minutes)} min</button>`;
       }
 
-      const rainOn  = !!r.rainDelay && this._isOn(r.rainDelay);
-      const smartOn = !!r.smartWatering && this._isOn(r.smartWatering);
+      // Same rule as the chip row: render only what there is data for.
+      const rain = r.rainDelay ? `
+          <button class="icon-btn accent${this._isOn(r.rainDelay) ? ' on' : ''}"
+            data-act="rain" title="Rain delay">
+            <ha-icon icon="${ICON.rain}"></ha-icon></button>` : '';
+      const smart = r.smartWatering ? `
+          <button class="icon-btn purple${this._isOn(r.smartWatering) ? ' on' : ''}"
+            data-act="smart" title="Smart watering">
+            <ha-icon icon="${ICON.smart}"></ha-icon></button>` : '';
       return `
         <div class="zone-actions">
-          ${main}
-          <button class="icon-btn accent${rainOn ? ' on' : ''}" data-act="rain"
-            ${r.rainDelay ? '' : 'disabled'} title="Rain delay">
-            <ha-icon icon="${ICON.rain}"></ha-icon></button>
-          <button class="icon-btn purple${smartOn ? ' on' : ''}" data-act="smart"
-            ${r.smartWatering ? '' : 'disabled'} title="Smart watering">
-            <ha-icon icon="${ICON.smart}"></ha-icon></button>
+          ${main}${rain}${smart}
         </div>`;
     }
 
@@ -1088,7 +1084,6 @@
       this.shadowRoot.innerHTML = `
         <style>${BASE_STYLES}${ZONE_STYLES}</style>
         <ha-card class="${wet ? 'accent-red' : ''}">
-          ${this._mushroomMissing() ? this._noticeHtml() : ''}
           <div class="row">
             ${shapeHtml(ICON.flood, wet ? RGB.red : RGB.accent, 'lg')}
             <div class="grow">
@@ -1098,12 +1093,10 @@
           </div>
           <div class="chips">${chips.join('')}</div>
         </ha-card>`;
-      this._bindCommon();
     }
 
     _bind(r) {
       const root = this.shadowRoot;
-      this._bindCommon();
 
       const name = root.querySelector('.zone-name');
       if (name) name.addEventListener('click', () => this._moreInfo(this._config.entity));
@@ -1181,10 +1174,8 @@
         this.shadowRoot.innerHTML = `
           <style>${BASE_STYLES}${CONTROLLER_STYLES}</style>
           <ha-card>
-            ${this._mushroomMissing() ? this._noticeHtml() : ''}
-            ${this._emptyHtml()}
+              ${this._emptyHtml()}
           </ha-card>`;
-        this._bindCommon();
         return;
       }
 
@@ -1196,11 +1187,10 @@
 
       let accent = RGB.green, status = 'All idle';
       if (anyFault)            { accent = RGB.red;    status = 'Fault detected'; }
-      else if (running.length === 1) {
+      else if (running.length)  {
         accent = RGB.accent;
-        status = this._zoneName(running[0]);
-      } else if (running.length > 1) {
-        accent = RGB.accent; status = running.length + ' zones running';
+        status = running.length + (running.length === 1 ? ' zone watering'
+                                                        : ' zones watering');
       } else if (rainOn)       { accent = RGB.accent; status = 'Rain delay active'; }
       else if (off)            { accent = RGB.orange; status = 'Off'; }
 
@@ -1211,8 +1201,7 @@
       this.shadowRoot.innerHTML = `
         <style>${BASE_STYLES}${CONTROLLER_STYLES}</style>
         <ha-card class="${anyFault ? 'accent-red' : ''}">
-          ${this._mushroomMissing() ? this._noticeHtml() : ''}
-          <div class="row">
+          <div class="row head">
             ${shapeHtml(ICON.controller, accent, 'lg')}
             <div class="grow">
               <div class="primary">${esc(title)}</div>
@@ -1228,7 +1217,7 @@
           ${anyFault ? `<div class="banner red"><ha-icon icon="${ICON.warn}"></ha-icon>
             <span>${esc(faultText(this._hass, dev.fault, null) || 'A station reports a fault.')}</span></div>` : ''}
           ${this._toast ? `<div class="toast">${esc(this._toast)}</div>` : ''}
-          <div class="zone-rows">${this._zoneRows(zones, showActions)}</div>
+          <div class="zone-rows">${this._zoneRows(zones, showActions, off)}</div>
           <div class="chips">${this._chips(dev, zones)}</div>
           ${showActions ? this._drawer(dev, zones) : ''}
         </ha-card>`;
@@ -1245,14 +1234,14 @@
 
     // Permanently-collapsed rows. Tapping the name opens more-info; a row never
     // expands into a zone card.
-    _zoneRows(zones, showActions) {
+    _zoneRows(zones, showActions, off) {
       return zones.map(zoneId => {
         const running = this._isOn(zoneId);
         const rgb     = running ? RGB.accent : RGB.grey;
         const minutes = num(this._attr(zoneId, 'manual_preset_runtime'))
           || this._presetMinutes(zones);
 
-        let state = 'Idle', stateStyle = '';
+        let state = off ? 'Off' : 'Idle', stateStyle = '';
         if (running) {
           const left = this._remaining(zoneId, minutes);
           state = left == null ? 'Watering' : 'Watering · ' + fmtClock(left) + ' left';
@@ -1372,7 +1361,7 @@
             ${shapeHtml(ICON.timer, RGB.accent)}
             <div class="grow">
               <div class="primary">Run time</div>
-              <div class="secondary">Sets manual preset on every zone</div>
+              <div class="secondary">Applies to every zone</div>
             </div>
             <div class="stepper">
               <button data-act="runtime" data-delta="-5" title="Less">
@@ -1426,7 +1415,6 @@
 
     _bind(dev, zones) {
       const root = this.shadowRoot;
-      this._bindCommon();
 
       root.querySelectorAll('[data-act]').forEach(el => {
         el.addEventListener('click', e => {

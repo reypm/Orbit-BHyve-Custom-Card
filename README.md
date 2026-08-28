@@ -18,14 +18,9 @@ controller card to use them, or vice versa.
 > **v3 is a breaking change.** The single `bhyve-sprinkler-card` is gone.
 > See [Migrating from v2](#migrating-from-v2).
 
-![Controller card beside two zone cards on a Home Assistant dashboard](docs/preview.png)
-
-<details>
-<summary>Dark theme</summary>
-
-![The same dashboard section in dark theme](docs/preview-dark.png)
-
-</details>
+| Light | Dark | Mobile |
+|---|---|---|
+| ![BHyve controller card beside a running and an idle zone card on a Home Assistant dashboard, light theme](docs/preview.png) | ![The same controller card and zone card layout rendered in dark theme](docs/preview-dark.png) | ![The controller card above a running zone card, stacked in a single column at a 375 pixel mobile viewport](docs/preview-mobile.png) |
 
 ---
 
@@ -33,9 +28,10 @@ controller card to use them, or vice versa.
 
 - Home Assistant 2023.1 or newer
 - The [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant) integration
-- [Mushroom](https://github.com/piitaya/lovelace-mushroom) — a **hard dependency** for the
-  intended look. Without it the cards still render, using fallback colours, and show a
-  dismissible notice recommending you install it via HACS.
+- [Mushroom](https://github.com/piitaya/lovelace-mushroom) — **optional.** The cards borrow
+  Mushroom's visual vocabulary, but every colour falls back to Mushroom's own default value,
+  so they look the same whether or not it is installed. If you do run a Mushroom theme that
+  sets `--mush-rgb-*`, the cards pick those overrides up automatically.
 
 ---
 
@@ -98,7 +94,11 @@ device_id: abc123…         # optional — defaults to the first B-hyve device 
 show_actions: true         # optional — default true
 ```
 
-Top to bottom:
+<img src="docs/controller-card.png" width="380"
+     alt="BHyve controller card with the drawer expanded, showing the device header with Auto/Off control, four compact zone rows, summary chips, and the drawer contents: the merged programs list, the rain delay row, and the run time stepper">
+
+Top to bottom — every element below is visible in the screenshot, which has the drawer
+expanded:
 
 - **Header** — device name, model and live status (`Front Lawn` / `2 zones running` /
   `Rain delay active` / `All idle` / `Fault detected` / `Off`), plus an **Auto/Off
@@ -119,12 +119,13 @@ Top to bottom:
 `show_actions: false` hides the Run/Stop buttons and the drawer, giving a read-only
 overview. The Auto/Off control stays.
 
-<img src="docs/controller-card.png" alt="Controller card with the programs and settings drawer expanded" width="380">
+### The Off state
 
-Switching the device to **Off** swaps the status to an orange banner, since no program
-will run until it goes back to Auto:
+Switching the device to **Off** swaps the status for an orange banner, since no program
+will run until it goes back to Auto. This is a device-level state: it affects every zone
+on the controller at once.
 
-![Controller and zone card while the device mode is Off](docs/zone-card-off.png)
+![BHyve controller card and zone card while the device mode is Off, showing the orange "Controller is off — no program will run" banner beneath the header](docs/zone-card-off.png)
 
 ### Controller card fields
 
@@ -178,9 +179,16 @@ is discovered from the zone's own device.
 | **Fault** | Red card border and icon, `Fault · will not run`, an inline warning banner with the human-readable fault from `station_faults`, and a disabled **Run blocked** button. The chip row is still shown. |
 | **Unavailable** | `?` icon, `Unavailable · entity not reporting`, only the hub and `Last seen …` chips, and **no action button at all**. |
 
-The zone card has no expander. Smart watering and program rows render directly.
+All four, in the same order as the table above — each panel is labelled with its state:
 
-![The four zone card states side by side: idle, running, fault and unavailable](docs/zone-card-states.png)
+![The four BHyve zone card states side by side. Idle: grey icon, "Idle · station 2" and a blue Run 10 min button. Running: blue icon, "Watering · 6:06 left", a red Stop button and a progress bar. Fault: red border and icon, "Fault · will not run", a red warning banner reading "Station 3 reports short circuit" and a greyed-out Run blocked button. Unavailable: question mark icon, "Unavailable · entity not reporting" and only two chips](docs/zone-card-states.png)
+
+> **There is a fifth thing to look for.** When the controller's device mode is **Off**,
+> no zone will run even though each one still reports `Idle`. That state lives on the
+> controller card, not the zone card — see [The Off state](#the-off-state) and
+> [`docs/zone-card-off.png`](docs/zone-card-off.png).
+
+The zone card has no expander. Smart watering and program rows render directly.
 
 ### The chip row
 
@@ -231,7 +239,7 @@ Point a zone card at a B-hyve flood sensor's `binary_sensor` and it renders the 
 layout instead: a home icon (blue when dry, red when wet), `Dry` or
 `Water detected · HH:MM`, and chips for temperature, signal strength and battery.
 
-![Flood sensor card in the dry and water-detected states](docs/flood-sensor.png)
+![BHyve flood sensor card in two states side by side. Dry: blue home icon and the label "Dry". Water detected: red accent border and icon with "Water detected" followed by the time it triggered. Both show temperature, signal strength and battery chips](docs/flood-sensor.png)
 
 ---
 
@@ -305,7 +313,8 @@ registered under Settings → Dashboards → Resources.
 registry. Confirm the integration is loaded, then set `device_id` explicitly. Note that
 discovery reads the registry once per page load; reload after adding devices.
 
-<img src="docs/empty-state.png" alt="The empty state: No B-hyve devices found" width="380">
+<img src="docs/empty-state.png" width="380"
+     alt="The BHyve card empty state: a large grey sprinkler icon above the heading 'No B-hyve devices found' and the subtext 'Add the Orbit B-hyve integration, or check that this card's entities still exist.'">
 
 **Zone stays Idle after tapping Run** *(zone card, controller card)* — the cards use
 optimistic state. If it snaps back, check the HA log for `bhyve.start_watering` errors and
@@ -328,7 +337,10 @@ of them, merged. If a program is missing from both, set `program_entities` expli
 `bhyve.set_manual_preset_runtime`. The value is kept for this card until you reload. Zone
 card Run buttons are unaffected.
 
-**Colours look flat** — Mushroom is not installed. Install `lovelace-mushroom` via HACS.
+**Colours don't match my Mushroom theme** — the cards read `--mush-rgb-*` from the document,
+which only has a value if your theme sets one. Mushroom does not set these itself; it only
+reads them. Without an override the cards use Mushroom's own default palette, which is the
+intended look.
 
 ---
 

@@ -4,7 +4,7 @@
   html,body{margin:0;padding:0;background:#f2f4f7;font-family:Roboto,system-ui,-apple-system,sans-serif}
   *,*::before,*::after{box-sizing:border-box}
   .wrap{display:flex;gap:40px;padding:32px;align-items:flex-start}
-  .col{width:var(--colw,380px);padding:16px;border-radius:16px;display:flex;flex-direction:column;gap:18px}
+  .col{width:var(--colw,380px);flex:0 0 auto;padding:16px;border-radius:16px;display:flex;flex-direction:column;gap:18px}
   .col.light{background:#f2f4f7}
   .col.dark{background:#111111}
   .col.teal{background:#f2f4f7}
@@ -232,6 +232,8 @@ const RECIPES = {
   'flood-sensor': {theme:'light', caps:true, cols:[
     [{cap:'Dry',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'}}],
     [{cap:'Water detected',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'},mutate:wet}]]},
+  'preview-mobile': {theme:'light', colw:343, pad:16, cols:[
+    [{tag:CTRL,cfg:{}},{tag:ZN,cfg:{entity:'valve.front_lawn'}}]]},
   'empty-state': {theme:'light', cols:[
     [{tag:CTRL,cfg:{device_id:'no-such-device'}}]]},
 };
@@ -244,11 +246,12 @@ if (PREVIEW || COMPOSE) {
   document.body.style.background=PAGE_BG[r.theme];
   const pv=document.getElementById('pv');
   pv.style.minHeight='100vh';
-  pv.style.cssText='display:flex;gap:20px;align-items:flex-start;padding:28px;'+
-    'background:'+PAGE_BG[r.theme]+';'+THEME_VARS[r.theme];
+  pv.style.cssText='display:flex;gap:20px;align-items:flex-start;padding:'+
+    (r.pad||28)+'px;background:'+PAGE_BG[r.theme]+';'+THEME_VARS[r.theme];
   r.cols.forEach(col=>{
     const d=document.createElement('div');
-    d.style.cssText='width:380px;display:flex;flex-direction:column;gap:20px';
+    d.style.cssText='width:'+(r.colw||380)+'px;flex:0 0 auto;'+
+      'display:flex;flex-direction:column;gap:'+(r.pad?16:20)+'px';
     col.forEach(spec=>{
       const box=document.createElement('div');
       if (r.caps && spec.cap) {
