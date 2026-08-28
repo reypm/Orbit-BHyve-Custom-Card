@@ -176,7 +176,6 @@ type: custom:bhyve-zone-card
 entity: valve.front_lawn   # required
 name: Front Lawn           # optional
 run_time: 10               # optional — minutes for the Run button
-show_programs: true        # optional — default true
 ```
 
 Everything else — hub, battery, history, programs, smart watering, rain delay, fault —
@@ -200,8 +199,59 @@ All four, in the same order as the table above — each panel is labelled with i
 > controller card, not the zone card — see [The Off state](#the-off-state) and
 > [`docs/zone-card-off.png`](docs/zone-card-off.png).
 
-The zone card has no expander. Smart watering and program rows render directly; set
-`show_programs: false` to leave them out of the card altogether.
+### Programs
+
+B-hyve hardware runs **one program at a time**, so the card treats the program switches as a
+single-selection group rather than a list of independent toggles. The section is three rows
+at most:
+
+1. **Smart watering** — always first, always visible. It adjusts whatever schedule is
+   running rather than competing with the lettered programs, so it sits outside the group
+   entirely and is never counted as a disabled program.
+2. **The one enabled program**, with an accent row fill. If no program is enabled you get a
+   neutral row instead — *"No program enabled · This zone only waters when you run it
+   manually"* — which is a legitimate setup, not a fault, and is coloured accordingly.
+3. **A fold row for everything else**, reading *"7 disabled programs"* collapsed and
+   *"Hide 7 disabled programs"* expanded (singular for one). It is omitted when there is
+   nothing to fold, and starts collapsed — the program you actually care about is already
+   on the card, so collapsing costs no information.
+
+![Zone card program section: collapsed by default showing Smart watering, the one enabled program with an accent fill, and a "4 disabled programs" fold row; expanded showing all four disabled programs; and the neutral "No program enabled" state](docs/zone-programs.png)
+
+**Enabling a program disables the one that was on.** Tapping an off program issues
+`switch.turn_on` for it and `switch.turn_off` for the outgoing one in the same handler, and
+both rows move together. Tapping the enabled program switches it off and leaves the zone
+with no program — that is a valid end state, not an error, and nothing is auto-enabled in
+its place.
+
+![Before and after tapping a different program: Program A moves from the enabled slot into the disabled list reading off, and Program C takes its place with the accent fill and its switch on](docs/zone-selection.png)
+
+If the B-hyve app has left two programs on, the card shows the first as enabled and leaves
+the other in the fold still reading on, rather than silently correcting a change you made
+elsewhere.
+
+#### Hiding the section vs. the fold
+
+These are two different things, on two different axes:
+
+- **`show_smart_watering_and_programs: false`** hides the section *entirely* — smart
+  watering, the enabled program, the neutral row and the fold all go, and nothing is
+  rendered in their place.
+- **The fold within a shown section is not configurable.** Whenever the section is
+  displayed it always uses the behaviour above: disabled programs collapse by default,
+  and there is no way to force the old always-show-everything layout back.
+
+```yaml
+type: custom:bhyve-zone-card
+entity: valve.front_lawn
+show_smart_watering_and_programs: false
+```
+
+> **Upgrading from v3.1/v3.2?** The zone card's old `show_programs` option did roughly what
+> `show_smart_watering_and_programs` does now, but it is **gone**, not renamed — a leftover
+> `show_programs: false` on a zone card is ignored. It was given a new name deliberately, so
+> an old config can't silently keep working with subtly different behaviour. The controller
+> card's `show_programs` is a separate option and is unaffected.
 
 ### The chip row
 
@@ -226,7 +276,7 @@ in v2 and is fixed here.
 | `entity` | string | **required** | The zone valve, or a flood-sensor `binary_sensor` |
 | `name` | string | zone name | Display name |
 | `run_time` | number | `10` | Minutes for the Run button |
-| `show_programs` | bool | `true` | Set `false` to omit the smart-watering row and program list entirely |
+| `show_smart_watering_and_programs` | bool | `true` | Set `false` to omit the whole smart-watering and programs section. See the note below — this is not the same as the fold |
 | `hub_entity` | string | discovered | `binary_sensor.*_connected` |
 | `battery_entity` | string | discovered | `sensor.*_battery_level` |
 | `history_entity` | string | discovered | `sensor.*_zone_history` |
@@ -261,10 +311,10 @@ layout instead: a home icon (blue when dry, red when wet), `Dry` or
 
 Both cards have visual editors. The controller editor offers title, device picker
 (filtered to the B-hyve integration) and the actions toggle; the zone editor offers the
-entity picker, name, run time and the **Show smart watering and programs** toggle. Both
-cards expose a `show_programs` toggle, worded for what each one actually hides — **Show
-programs & settings** on the controller card. The entity overrides in the tables above are
-YAML-only for now — the editors note this inline.
+entity picker, name and run time. The controller card additionally exposes **Show programs
+& settings** (`show_programs`); the zone card has no equivalent, since its program section
+manages its own fold. The entity overrides in the tables above are YAML-only for now — the
+editors note this inline.
 
 ---
 
