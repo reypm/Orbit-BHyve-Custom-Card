@@ -74,8 +74,10 @@ global.document = {
 };
 // Pretend Mushroom is installed so the dependency notice stays out of the way.
 global.getComputedStyle = () => ({ getPropertyValue: () => ' 33, 150, 243 ' });
+const debugLog = [];
 global.console = {
   info: () => {}, log: () => {},
+  debug: (...a) => { debugLog.push(a); },
   error: (...a) => process.stderr.write('[ERR] ' + a.join(' ') + '\n'),
 };
 
@@ -124,7 +126,7 @@ const st = (state, attributes, extra) =>
 function baseStates() {
   return {
     'valve.front_lawn': st('open', {
-      station: 1, zone_name: 'Front Lawn', manual_preset_runtime: 10,
+      station: 1, zone_name: 'Front Lawn', manual_preset_runtime: 600,
       started_watering_station_at: new Date(NOW - 60000).toISOString(),
       next_start_time: future,
     }),
@@ -443,7 +445,7 @@ async function main() {
   const two = await mountController({}, makeHass({ states: (() => {
     const x = baseStates(); noFault(x);
     x['valve.garden_beds'] = st('open', { station: 2, zone_name: 'Garden Beds',
-      manual_preset_runtime: 10,
+      manual_preset_runtime: 600,
       started_watering_station_at: new Date(NOW - 60000).toISOString() });
     return x; })() }));
   assert(two.shadowRoot.innerHTML.indexOf('2 zones watering') !== -1,
@@ -534,7 +536,7 @@ async function main() {
   assert(fallback._presetLocal === true, 'marked session-only');
   html = fallback.shadowRoot.innerHTML;
   assert(html.indexOf('class="toast"') !== -1, 'surfaces an inline note');
-  assert(html.indexOf('did not accept') !== -1, 'note says the device refused the preset');
+  assert(html.indexOf('accept this') !== -1, 'note says the device refused the preset');
   assert(html.indexOf('15 min') !== -1, 'stepper still displays the new value');
 
   const noService = makeHass({ services: { homeassistant: { turn_on: {}, turn_off: {} } } });
@@ -654,6 +656,132 @@ async function main() {
     .forEach(([name, rgb]) => assert(
       code.indexOf('var(--mush-rgb-' + name + ', ' + rgb + ')') !== -1,
       name + ' falls back to Mushroom\'s own default ' + rgb));
+
+  group('24. manual_preset_runtime is seconds, not minutes');
+  // Regression: the attribute was rendered and dispatched as if it were minutes,
+  // so a 300 s preset showed "Run 300 min" and would have watered for 5 hours.
+  const secHass = makeHass({ states: (() => {
+    const x = baseStates();
+    x['binary_sensor.bhyve_xr_fault'] = st('off', { station_faults: [] });
+    x['valve.front_lawn']  = st('closed', { station: 1, zone_name: 'Front Lawn',
+      manual_preset_runtime: 600, next_start_time: future });
+    x['valve.garden_beds'] = st('closed', { station: 2, zone_name: 'Garden Beds',
+      manual_preset_runtime: 300, next_start_time: future });
+    return x; })() });
+
+  const z300 = await mountZone({ entity: 'valve.garden_beds' }, secHass);
+  const z600 = await mountZone({ entity: 'valve.front_lawn' }, secHass);
+  const h300 = z300.shadowRoot.innerHTML, h600 = z600.shadowRoot.innerHTML;
+
+  assert(h300.indexOf('Run 5 min') !== -1, '300 s preset renders "Run 5 min"');
+  assert(h600.indexOf('Run 10 min') !== -1, '600 s preset renders "Run 10 min"');
+  assert(h300.indexOf('Run 300 min') === -1, 'raw seconds never reach the label');
+  assert(h600.indexOf('Run 600 min') === -1, 'raw seconds never reach the label (600)');
+
+  // The label alone is not enough — a label-only fix would still water for hours.
+  assert(/data-act="run" data-minutes="5"/.test(h300), '300 s dispatches minutes=5');
+  assert(/data-act="run" data-minutes="10"/.test(h600), '600 s dispatches minutes=10');
+
+  const runHass300 = makeHass({ states: secHass.states });
+  const c300 = await mountZone({ entity: 'valve.garden_beds' }, runHass300);
+  c300.shadowRoot.querySelectorAll('[data-act]').find(e => e.dataset.act === 'run').click();
+  const call300 = runHass300.calls.find(c => c.service === 'start_watering');
+  assert(!!call300, 'Run dispatches start_watering');
+  assert(call300.data.minutes === 5, 'service actually receives 5, not 300');
+
+  const runHass600 = makeHass({ states: secHass.states });
+  const c600 = await mountZone({ entity: 'valve.front_lawn' }, runHass600);
+  c600.shadowRoot.querySelectorAll('[data-act]').find(e => e.dataset.act === 'run').click();
+  const call600 = runHass600.calls.find(c => c.service === 'start_watering');
+  assert(call600.data.minutes === 10, 'service actually receives 10, not 600');
+
+  // Same conversion on the controller's compact rows.
+  const ctrlSec = await mountController({}, secHass);
+  const ctrlHtml = ctrlSec.shadowRoot.innerHTML;
+  assert(ctrlHtml.indexOf('>10m</button>') !== -1 || /data-minutes="10"/.test(ctrlHtml),
+         'controller row shows 10m for a 600 s preset');
+  assert(ctrlHtml.indexOf('300m') === -1 && ctrlHtml.indexOf('600m') === -1,
+         'controller rows never show raw seconds');
+  assert(/data-minutes="5"/.test(ctrlHtml), 'controller row dispatches 5 for a 300 s preset');
+
+  // And on the live countdown, which would otherwise run 60x too long.
+  const liveHass = makeHass({ states: (() => {
+    const x = baseStates();
+    x['valve.front_lawn'] = st('open', { station: 1, zone_name: 'Front Lawn',
+      manual_preset_runtime: 600,
+      started_watering_station_at: new Date(NOW - 60000).toISOString() });
+    return x; })() });
+  const live = await mountZone({ entity: 'valve.front_lawn' }, liveHass);
+  const leftSec = live._remaining('valve.front_lawn', 10);
+  assert(Math.abs(leftSec - 540) < 5,
+         'countdown uses 600 s = 10 min, leaving ~540 s after one minute (got ' +
+         Math.round(leftSec) + ')');
+  assert(leftSec < 600, 'countdown is not 60x too long');
+
+  group('25. Run-time stepper reports what it sent');
+  debugLog.length = 0;
+  const dbgHass = makeHass();
+  const dbg = await mountController({}, dbgHass);
+  dbg._expanded = true; dbg._render();
+  dbg.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'runtime' && e.dataset.delta === '5').click();
+  await flush();
+  const sent = debugLog.find(a => String(a[0]).indexOf('set_manual_preset_runtime') !== -1);
+  assert(!!sent, 'logs the service call for verification against the HA log');
+  assert(Array.isArray(sent[1].entity_id) && sent[1].entity_id.length === 4,
+         'logged payload targets every zone valve');
+  assert(sent[1].minutes === 15, 'logged payload carries minutes, the service unit');
+
+  // The reported symptom: the stepper looked inert because the rows preferred
+  // the reported attribute, which the integration never refreshes in-session.
+  assert(dbg.shadowRoot.innerHTML.indexOf('15 min') !== -1, 'stepper shows the new value');
+  assert(/data-minutes="15"/.test(dbg.shadowRoot.innerHTML),
+         'zone rows adopt the newly set run time immediately');
+  assert(dbg.shadowRoot.innerHTML.indexOf('>10m<') === -1,
+         'rows no longer fall back to the stale attribute after an explicit change');
+
+  const rejHass = makeHass({ rejectService: true });
+  const rej = await mountController({}, rejHass);
+  rej._expanded = true; rej._render();
+  rej.shadowRoot.querySelectorAll('[data-act]')
+    .find(e => e.dataset.act === 'runtime' && e.dataset.delta === '5').click();
+  await flush(); await flush();
+  const rejHtml = rej.shadowRoot.innerHTML;
+  assert(rejHtml.indexOf('accept this') !== -1,
+         'rejection surfaces the visible fallback notice');
+  assert(rejHtml.indexOf('class="toast"') !== -1, 'notice rendered as an inline toast');
+  assert(rejHtml.indexOf('local default only') !== -1, 'notice says the value is local only');
+  assert(rej._presetLocal === true, 'and the session-only flag is set');
+
+  group('26. show_programs');
+  const withRows = await mountZone({ entity: 'valve.front_lawn' });
+  assert(withRows.shadowRoot.innerHTML.indexOf('class="rows"') !== -1,
+         'programs block rendered by default');
+  assert(withRows._config.show_programs === true, 'defaults to true');
+
+  const noRows = await mountZone({ entity: 'valve.front_lawn', show_programs: false });
+  const noRowsHtml = noRows.shadowRoot.innerHTML;
+  assert(noRowsHtml.indexOf('class="rows"') === -1, 'block omitted when false');
+  // The quick-action button keeps title="Smart watering", so match the row itself.
+  assert(noRowsHtml.indexOf('<div class="primary">Smart watering</div>') === -1,
+         'smart watering row not in the DOM');
+  assert(noRowsHtml.indexOf('Program A') === -1, 'program rows not in the DOM');
+  assert(body(noRowsHtml).indexOf('display: none') === -1 &&
+         body(noRowsHtml).indexOf('hidden') === -1,
+         'omitted from the DOM, not hidden with CSS');
+  // Everything else still renders.
+  assert(noRowsHtml.indexOf('Hub online') !== -1, 'chip row unaffected');
+  assert(noRowsHtml.indexOf('data-act="stop"') !== -1, 'controls unaffected');
+
+  const zoneEd = new (customElements.get('bhyve-zone-card-editor'))();
+  zoneEd.setConfig({ entity: 'valve.front_lawn' });
+  zoneEd.hass = makeHass();
+  const schema = zoneEd._schema().map(f => f.name);
+  assert(schema.indexOf('show_programs') !== -1, 'exposed in the visual editor schema');
+  assert(zoneEd._schema().find(f => f.name === 'show_programs')
+           .selector.boolean !== undefined, 'rendered as a boolean toggle');
+  assert(zoneEd._computeLabel({ name: 'show_programs' }) !== 'show_programs',
+         'has a human-readable editor label');
 
   group('23. Dark-theme chip contrast');
   assert(code.indexOf('--bh-chip:    color-mix(in srgb, var(--primary-text-color)') !== -1,

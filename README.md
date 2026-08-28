@@ -167,6 +167,7 @@ type: custom:bhyve-zone-card
 entity: valve.front_lawn   # required
 name: Front Lawn           # optional
 run_time: 10               # optional — minutes for the Run button
+show_programs: true        # optional — default true
 ```
 
 Everything else — hub, battery, history, programs, smart watering, rain delay, fault —
@@ -190,7 +191,8 @@ All four, in the same order as the table above — each panel is labelled with i
 > controller card, not the zone card — see [The Off state](#the-off-state) and
 > [`docs/zone-card-off.png`](docs/zone-card-off.png).
 
-The zone card has no expander. Smart watering and program rows render directly.
+The zone card has no expander. Smart watering and program rows render directly; set
+`show_programs: false` to leave them out of the card altogether.
 
 ### The chip row
 
@@ -215,6 +217,7 @@ in v2 and is fixed here.
 | `entity` | string | **required** | The zone valve, or a flood-sensor `binary_sensor` |
 | `name` | string | zone name | Display name |
 | `run_time` | number | `10` | Minutes for the Run button |
+| `show_programs` | bool | `true` | Set `false` to omit the smart-watering row and program list entirely |
 | `hub_entity` | string | discovered | `binary_sensor.*_connected` |
 | `battery_entity` | string | discovered | `sensor.*_battery_level` |
 | `history_entity` | string | discovered | `sensor.*_zone_history` |
@@ -249,8 +252,8 @@ layout instead: a home icon (blue when dry, red when wet), `Dry` or
 
 Both cards have visual editors. The controller editor offers title, device picker
 (filtered to the B-hyve integration) and the actions toggle; the zone editor offers the
-entity picker, name and run time. The entity overrides in the tables above are YAML-only
-for now — the editors note this inline.
+entity picker, name, run time and the **Show smart watering and programs** toggle. The
+entity overrides in the tables above are YAML-only for now — the editors note this inline.
 
 ---
 
@@ -321,6 +324,16 @@ discovery reads the registry once per page load; reload after adding devices.
 **Zone stays Idle after tapping Run** *(zone card, controller card)* — the cards use
 optimistic state. If it snaps back, check the HA log for `bhyve.start_watering` errors and
 confirm the entity is the zone valve.
+
+**The run-time stepper doesn't change the zone cards** *(controller card)* — expected. The
+integration reads `manual_preset_runtime` once when it builds the valve entity and never
+refreshes it, so a successful `bhyve.set_manual_preset_runtime` is not reflected in the
+attribute until the integration reloads. Tracked upstream:
+[sebr/bhyve-home-assistant#478](https://github.com/sebr/bhyve-home-assistant/issues/478).
+The stepper's own value updates immediately and is used by the controller's rows; zone
+cards pick it up after a reload. If the device rejects the call outright the card says so
+beneath the stepper and keeps the value locally. Support for that service is patchy — set
+`run_time` per zone card if your device does not take it.
 
 **A chip is missing** *(zone card)* — each chip has its own rule; see
 [The chip row](#the-chip-row). Last-run chips need the zone to have run at least once, and

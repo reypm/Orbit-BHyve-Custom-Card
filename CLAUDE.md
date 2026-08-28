@@ -56,7 +56,7 @@ node validate.test.js
 `validate.test.js` is headless: it stubs browser globals, `eval`s the card file, then
 mounts both cards against a fake device/entity registry. The DOM stub parses rendered
 tags, so tests dispatch real clicks at handles and exercise the actual event handlers.
-168 assertions across 24 groups cover the zone card's four states, chip order and each
+200 assertions across 27 groups cover the zone card's four states, chip order and each
 chip's visibility rule, the drawer toggle, the run-time stepper's fallback, the merged
 programs list with per-zone run times, station-order zone sorting, the device-Off state,
 omitted quick-action buttons, service-call payloads, flood sensors, the empty state, and
@@ -71,6 +71,18 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
 
 - **Design source of truth:** the "BHyve Card Family v3" Claude Design project. The chip
   order, the four zone states, copy strings and colour treatments come from there.
+- **`manual_preset_runtime` is in SECONDS.** The integration's source field is
+  `manual_preset_runtime_sec` and it divides by 60 itself before watering, but both
+  `bhyve.start_watering` and `bhyve.set_manual_preset_runtime` take MINUTES. Every read
+  goes through `_presetRuntimeMinutes()` so that asymmetry is handled once — never read
+  the attribute directly. Reading it raw shipped a bug that displayed "Run 300 min" and
+  would have watered for five hours.
+- **A successful preset write is not observable.** The valve entity assigns
+  `_manual_preset_runtime` in its constructor and has no coordinator-update hook, so the
+  attribute cannot change during a session. Do not add a "did the attribute change?"
+  confirmation to the run-time stepper — it would report failure on every success.
+  Tracked upstream: https://github.com/sebr/bhyve-home-assistant/issues/478 — if that lands,
+  the stepper could gain real confirmation and this constraint can be revisited.
 - **Optimistic UI:** `_pendingOn` / `_pendingOff` sets, cleared when HA confirms or on a
   timeout. `_isOn()` checks them before HA state; `open` → true for valves.
 - **Live countdown:** recomputed from `started_watering_station_at` plus the run minutes,

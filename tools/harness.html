@@ -108,7 +108,7 @@ const st=(state,attributes,extra)=>Object.assign(
   {state,attributes:attributes||{},last_changed:new Date(NOW).toISOString()},extra||{});
 
 function baseStates(){return{
- 'valve.front_lawn':st('open',{station:1,zone_name:'Front Lawn',manual_preset_runtime:10,
+ 'valve.front_lawn':st('open',{station:1,zone_name:'Front Lawn',manual_preset_runtime:600,
    started_watering_station_at:new Date(NOW-228000).toISOString(),next_start_time:future}),
  'valve.garden_beds':st('closed',{station:2,zone_name:'Garden Beds',next_start_time:future}),
  'valve.side_strip':st('closed',{station:3,zone_name:'Side Strip',next_start_time:future}),
