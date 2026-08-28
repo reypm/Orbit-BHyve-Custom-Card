@@ -1,5 +1,7 @@
 # B-hyve Cards for Home Assistant
 
+[![Unit Tests](https://github.com/reypm/Orbit-BHyve-Custom-Card/actions/workflows/test.yml/badge.svg)](https://github.com/reypm/Orbit-BHyve-Custom-Card/actions/workflows/test.yml)
+
 Two Lovelace cards for [Orbit B-hyve](https://bhyve.orbitonline.com/) irrigation systems,
 built for the [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant)
 integration and styled with the [Mushroom](https://github.com/piitaya/lovelace-mushroom)
