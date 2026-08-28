@@ -82,3 +82,37 @@ no-op notice is pure liability.
 Mushroom provides, state that dependency in the README and fail visibly at the point of
 use — do not reintroduce a global "is Mushroom installed?" heuristic. `--mush-rgb-*` in
 particular can never answer that question.
+
+---
+
+## 10. Controller status text is pluralised — an approved deviation
+
+This is the one entry here where the shipped behaviour intentionally differs **from** the
+design file rather than deferring to it. It is approved, in writing, by the repo owner.
+
+**What the design file says.** `BHyve Card Family v3.dc.html` builds the controller's
+secondary line as:
+
+```js
+runningIds.length ? "B‑hyve XR · " + runningIds.length + " zone watering" : …
+```
+
+The noun is unpluralised in both branches, so with two zones running the mockup literally
+reads "B-hyve XR · 2 zone watering".
+
+**What ships.** The count is pluralised:
+
+- one zone running → `1 zone watering`
+- more than one → `N zones watering`
+
+**Why this is deliberate.** The design canvas renders a single sample state at a time, so
+its copy was only ever exercised with one running zone — the string is correct in the case
+the mockup shows and simply was never varied. A static mockup does not make grammar
+decisions for every value of N. Shipping "2 zone watering" in a real dashboard would read
+as a bug to users, and it would be inconsistent with the card's own surrounding copy, which
+is otherwise grammatical ("All idle", "Rain delay active", "Fault detected").
+
+**Do not "fix" this back.** A future contributor diffing the implementation against the
+design file will find this discrepancy and may be tempted to restore the literal
+unpluralised string to match. Do not. If the design file is ever regenerated with a
+multi-zone sample state, it should adopt the plural, not the other way round.
