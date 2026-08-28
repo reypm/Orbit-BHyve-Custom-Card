@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION   = '3.0.0';
+  const CARD_VERSION   = '3.1.0';
   const CONTROLLER     = 'bhyve-controller-card';
   const ZONE           = 'bhyve-zone-card';
   const CONTROLLER_ED  = 'bhyve-controller-card-editor';

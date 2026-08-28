@@ -254,7 +254,10 @@ async function main() {
   assert(!!customElements.get('bhyve-zone-card-editor'), 'zone editor registered');
   assert(window.customCards.length === 2, 'two customCards entries');
   assert(window.customCards.every(c => c.preview === true), 'both marked preview');
-  assert(code.indexOf("CARD_VERSION   = '3.0.0'") !== -1, 'version is 3.0.0');
+  // Keep the shipped version in step with the release tag.
+  const EXPECTED_VERSION = '3.1.0';
+  assert(code.indexOf("CARD_VERSION   = '" + EXPECTED_VERSION + "'") !== -1,
+         'version constant is ' + EXPECTED_VERSION);
 
   group('2. setConfig');
   try { new Zone().setConfig({}); assert(false, 'zone card should require entity'); }
