@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION   = '3.1.0';
+  const CARD_VERSION   = '3.2.0';
   const CONTROLLER     = 'bhyve-controller-card';
   const ZONE           = 'bhyve-zone-card';
   const CONTROLLER_ED  = 'bhyve-controller-card-editor';
@@ -1147,7 +1147,7 @@
 
     setConfig(config) {
       if (!config) throw new Error('[bhyve-controller-card] Invalid configuration.');
-      this._config = Object.assign({ show_actions: true }, config);
+      this._config = Object.assign({ show_actions: true, show_programs: true }, config);
       if (this._hass) this._render();
     }
 
@@ -1194,7 +1194,10 @@
         return;
       }
 
-      const showActions = this._config.show_actions !== false;
+      const showActions  = this._config.show_actions !== false;
+      // show_actions already suppressed the drawer as part of hiding every
+      // control; show_programs drops it on its own while leaving Run/Stop.
+      const showPrograms = this._config.show_programs !== false;
       const running     = zones.filter(z => this._isOn(z));
       const rainOn      = !!dev.rainDelay && this._isOn(dev.rainDelay);
       const off         = !!dev.mode && this._st(dev.mode) && this._st(dev.mode).state === 'off';
@@ -1234,7 +1237,7 @@
           ${this._toast ? `<div class="toast">${esc(this._toast)}</div>` : ''}
           <div class="zone-rows">${this._zoneRows(zones, showActions, off)}</div>
           <div class="chips">${this._chips(dev, zones)}</div>
-          ${showActions ? this._drawer(dev, zones) : ''}
+          ${showActions && showPrograms ? this._drawer(dev, zones) : ''}
         </ha-card>`;
 
       this._bind(dev, zones);
@@ -1472,6 +1475,12 @@
   // ---------------------------------------------------------------------------
   // Config editors
   // ---------------------------------------------------------------------------
+  // `show_programs` hides different things on each card, so the controller
+  // spells out what its own drawer contains.
+  const CONTROLLER_LABELS = {
+    show_programs: 'Show programs & settings',
+  };
+
   const LABELS = {
     title:        'Title (defaults to the device name)',
     device_id:    'B-hyve device',
@@ -1541,11 +1550,16 @@
   }
 
   class BhyveControllerCardEditor extends BhyveEditorBase {
+    // Deliberately free of `this` — ha-form calls computeLabel unbound.
+    _computeLabel(schema) {
+      return CONTROLLER_LABELS[schema.name] || LABELS[schema.name] || schema.name;
+    }
     _schema() {
       return [
-        { name: 'title',        selector: { text: {} } },
-        { name: 'device_id',    selector: { device: { integration: 'bhyve' } } },
-        { name: 'show_actions', selector: { boolean: {} } },
+        { name: 'title',         selector: { text: {} } },
+        { name: 'device_id',     selector: { device: { integration: 'bhyve' } } },
+        { name: 'show_actions',  selector: { boolean: {} } },
+        { name: 'show_programs', selector: { boolean: {} } },
       ];
     }
     _hint() {

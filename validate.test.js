@@ -72,6 +72,10 @@ global.document = {
   documentElement: {},
   createElement: tag => ({ tag, addEventListener() {}, appendChild() {} }),
 };
+// Register a stand-in ha-form. Without one the editors take their "loading"
+// path, and the stubbed whenDefined() resolves instantly, so _render() would
+// re-enter itself forever and starve the event loop at the next await.
+customElements.define('ha-form', class HaFormStub {});
 // Pretend Mushroom is installed so the dependency notice stays out of the way.
 global.getComputedStyle = () => ({ getPropertyValue: () => ' 33, 150, 243 ' });
 const debugLog = [];
@@ -255,7 +259,7 @@ async function main() {
   assert(window.customCards.length === 2, 'two customCards entries');
   assert(window.customCards.every(c => c.preview === true), 'both marked preview');
   // Keep the shipped version in step with the release tag.
-  const EXPECTED_VERSION = '3.1.0';
+  const EXPECTED_VERSION = '3.2.0';
   assert(code.indexOf("CARD_VERSION   = '" + EXPECTED_VERSION + "'") !== -1,
          'version constant is ' + EXPECTED_VERSION);
 
@@ -790,6 +794,64 @@ async function main() {
   assert(code.indexOf('--bh-chip:    color-mix(in srgb, var(--primary-text-color)') !== -1,
          'neutral chip fill derives from the text colour, so it inverts with the theme');
   assert(/--bh-chip:\s+rgba\(/.test(code), 'a static rgba fallback precedes the color-mix value');
+
+  group('27. show_programs — controller card');
+  const drawerOn = await mountController({});
+  const drawerOnHtml = drawerOn.shadowRoot.innerHTML;
+  assert(drawerOn._config.show_programs === true, 'defaults to true');
+  assert(drawerOnHtml.indexOf('data-act="drawer"') !== -1, 'drawer toggle rendered by default');
+  assert(drawerOnHtml.indexOf('programs &amp; settings') !== -1, 'toggle row present by default');
+
+  const drawerOff = await mountController({ show_programs: false });
+  const offHtml2 = drawerOff.shadowRoot.innerHTML;
+  // The whole drawer goes, its own show/hide row included.
+  assert(offHtml2.indexOf('data-act="drawer"') === -1, 'toggle row omitted when false');
+  assert(offHtml2.indexOf('programs &amp; settings') === -1, 'show/hide copy gone');
+  assert(offHtml2.indexOf('class="drawer"') === -1, 'drawer body omitted');
+  assert(offHtml2.indexOf('Programs · all zones') === -1, 'merged programs list omitted');
+  assert(offHtml2.indexOf('Rain delay') === -1, 'rain delay row omitted');
+  assert(offHtml2.indexOf('Run time') === -1, 'run time stepper omitted');
+  assert(offHtml2.indexOf('data-act="runtime"') === -1, 'stepper controls not in the DOM');
+  assert(body(offHtml2).indexOf('display: none') === -1 &&
+         body(offHtml2).indexOf('hidden') === -1,
+         'omitted from the DOM, not hidden with CSS');
+
+  // Everything outside the drawer is untouched.
+  assert(offHtml2.indexOf('data-act="mode"') !== -1, 'Auto/Off control unaffected');
+  assert(offHtml2.indexOf('data-act="run"') !== -1, 'zone Run buttons unaffected');
+  assert((offHtml2.match(/class="zone-row"/g) || []).length === 4, 'zone rows unaffected');
+  assert(offHtml2.indexOf('class="chips"') !== -1, 'summary chips unaffected');
+
+  // Expanding it while hidden must not resurrect it.
+  drawerOff._expanded = true; drawerOff._render();
+  assert(drawerOff.shadowRoot.innerHTML.indexOf('class="drawer"') === -1,
+         'stays omitted even if _expanded is set');
+
+  // Interaction with the pre-existing show_actions, which also hides the drawer.
+  const noActions = await mountController({ show_actions: false });
+  assert(noActions.shadowRoot.innerHTML.indexOf('data-act="drawer"') === -1,
+         'show_actions false still hides the drawer, as before');
+  const bothOn = await mountController({ show_actions: true, show_programs: true });
+  assert(bothOn.shadowRoot.innerHTML.indexOf('data-act="drawer"') !== -1,
+         'drawer returns when both are true');
+
+  const ctrlEd = new (customElements.get('bhyve-controller-card-editor'))();
+  ctrlEd.setConfig({});
+  ctrlEd.hass = makeHass();
+  const ctrlSchema = ctrlEd._schema().map(f => f.name);
+  assert(ctrlSchema.indexOf('show_programs') !== -1, 'exposed in the controller editor schema');
+  assert(ctrlEd._schema().find(f => f.name === 'show_programs')
+           .selector.boolean !== undefined, 'rendered as a boolean toggle');
+  assert(ctrlEd._computeLabel({ name: 'show_programs' }) === 'Show programs & settings',
+         'controller uses its own wording for the shared key');
+  // ha-form calls computeLabel unbound, so it must not rely on `this`.
+  const unbound = ctrlEd._computeLabel;
+  assert(unbound({ name: 'show_programs' }) === 'Show programs & settings',
+         'label lookup works unbound');
+  const zoneEd2 = new (customElements.get('bhyve-zone-card-editor'))();
+  assert(zoneEd2._computeLabel({ name: 'show_programs' }) ===
+         'Show smart watering and programs',
+         'zone card keeps its own wording for the same key');
 
   // ── Summary ──────────────────────────────────────────────────────────────
   process.stdout.write('\n-----------------------------------------\n');
