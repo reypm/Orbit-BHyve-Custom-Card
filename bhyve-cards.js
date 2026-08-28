@@ -695,11 +695,21 @@
       }, 8000);
     }
 
+    // The integration reports manual_preset_runtime in SECONDS — its source
+    // field is literally `manual_preset_runtime_sec`, and the integration
+    // divides by 60 itself before watering. Both bhyve.start_watering and
+    // bhyve.set_manual_preset_runtime take MINUTES. Every read goes through
+    // here so that asymmetry is handled exactly once.
+    _presetRuntimeMinutes(zoneEntityId) {
+      const seconds = num(this._attr(zoneEntityId, 'manual_preset_runtime'));
+      return seconds == null ? null : seconds / 60;
+    }
+
     // Seconds left on a running zone, recomputed from the start timestamp.
     _remaining(zoneEntityId, fallbackMinutes) {
       const startedAt = this._attr(zoneEntityId, 'started_watering_station_at');
       const minutes = this._runMinutes[zoneEntityId]
-        || num(this._attr(zoneEntityId, 'manual_preset_runtime'))
+        || this._presetRuntimeMinutes(zoneEntityId)
         || fallbackMinutes || 10;
       if (!startedAt) return null;
       const start = new Date(startedAt);
@@ -832,7 +842,7 @@
       if (!config || !config.entity) {
         throw new Error('[bhyve-zone-card] "entity" is required (the zone valve).');
       }
-      this._config = Object.assign({ run_time: 10 }, config);
+      this._config = Object.assign({ run_time: 10, show_programs: true }, config);
       if (this._hass) this._render();
     }
 
@@ -880,7 +890,7 @@
       if (running) {
         const left  = this._remaining(zoneId, c.run_time);
         const total = (this._runMinutes[zoneId]
-          || num(this._attr(zoneId, 'manual_preset_runtime')) || c.run_time || 10) * 60;
+          || this._presetRuntimeMinutes(zoneId) || c.run_time || 10) * 60;
         const pct = left == null ? 0 : Math.max(0, Math.min(100, (1 - left / total) * 100));
         bar = `<div class="bar"><div style="width: ${pct}%;"></div></div>`;
       }
@@ -981,7 +991,10 @@
 
     _actions(r, running, blocked) {
       const c = this._config;
-      const minutes = num(this._attr(c.entity, 'manual_preset_runtime')) || c.run_time || 10;
+      // Label and dispatched value are derived from one rounded integer, so a
+      // display fix can never drift from what actually gets watered.
+      const mins = Math.max(1, Math.round(
+        this._presetRuntimeMinutes(c.entity) || c.run_time || 10));
 
       let main;
       if (blocked) {
@@ -991,8 +1004,8 @@
         main = `<button class="btn stop" data-act="stop">
           <ha-icon icon="${ICON.stop}"></ha-icon>Stop</button>`;
       } else {
-        main = `<button class="btn" data-act="run" data-minutes="${minutes}">
-          <ha-icon icon="${ICON.play}"></ha-icon>Run ${Math.round(minutes)} min</button>`;
+        main = `<button class="btn" data-act="run" data-minutes="${mins}">
+          <ha-icon icon="${ICON.play}"></ha-icon>Run ${mins} min</button>`;
       }
 
       // Same rule as the chip row: render only what there is data for.
@@ -1012,6 +1025,8 @@
 
     // Rendered inline — the zone card has no expander.
     _rows(r) {
+      // Omitted from the DOM entirely, like every other optional element here.
+      if (this._config.show_programs === false) return '';
       const rows = [];
 
       if (r.smartWatering) {
@@ -1157,7 +1172,7 @@
     _presetMinutes(zones) {
       if (this._runtime != null) return this._runtime;
       for (const z of zones) {
-        const m = num(this._attr(z, 'manual_preset_runtime'));
+        const m = this._presetRuntimeMinutes(z);
         if (m != null) return m;
       }
       return this._config.run_time || 10;
@@ -1238,8 +1253,13 @@
       return zones.map(zoneId => {
         const running = this._isOn(zoneId);
         const rgb     = running ? RGB.accent : RGB.grey;
-        const minutes = num(this._attr(zoneId, 'manual_preset_runtime'))
-          || this._presetMinutes(zones);
+        // A value the user just dialled in wins over the reported attribute.
+        // The integration never refreshes that attribute within a session, so
+        // deferring to it would make the stepper look inert.
+        const minutes = Math.max(1, Math.round(
+          this._runtime != null
+            ? this._runtime
+            : (this._presetRuntimeMinutes(zoneId) || this._presetMinutes(zones))));
 
         let state = off ? 'Off' : 'Idle', stateStyle = '';
         if (running) {
@@ -1259,7 +1279,7 @@
                <ha-icon icon="${ICON.stop}"></ha-icon>Stop</button>`
           : `<button class="btn" data-act="run" data-entity="${esc(zoneId)}"
                data-minutes="${minutes}">
-               <ha-icon icon="${ICON.play}"></ha-icon>${Math.round(minutes)}m</button>`) : '';
+               <ha-icon icon="${ICON.play}"></ha-icon>${minutes}m</button>`) : '';
 
         return `
           <div class="zone-row">
@@ -1386,29 +1406,42 @@
         </button>`;
     }
 
-    // Writes the preset to the device; on rejection keeps it as a session-only
-    // default for this card and says so.
+    // Writes the preset to every zone on the controller, in MINUTES (the
+    // service's unit — it multiplies by 60 itself). On a rejected or missing
+    // service the value is kept as a session-only default and said so out loud.
+    //
+    // Note there is deliberately no "did the attribute change?" confirmation.
+    // The integration assigns manual_preset_runtime once in the valve entity's
+    // constructor and never refreshes it, so the attribute cannot change during
+    // a session even when the device accepts the write. A timeout-based check
+    // would therefore report failure every single time, including on success.
     _setRuntime(zones, delta) {
       const next = Math.max(1, Math.min(60, this._presetMinutes(zones) + delta));
       this._runtime = next;
       this._toast = null;
       this._render();
 
-      if (!this._hasService('bhyve', 'set_manual_preset_runtime')) {
+      console.debug('[bhyve-controller-card] set_manual_preset_runtime',
+                    { entity_id: zones, minutes: next });
+
+      const failed = reason => {
         this._presetLocal = true;
-        this._toast = 'This device did not accept a preset run time — using ' +
-                      next + ' min for this card only, until you reload.';
+        this._toast = 'Device didn\u2019t accept this — using ' + next +
+                      ' min as a local default only.';
+        console.debug('[bhyve-controller-card] preset rejected, keeping local default',
+                      { minutes: next, reason: reason });
         this._render();
+      };
+
+      if (!this._hasService('bhyve', 'set_manual_preset_runtime')) {
+        failed('service not available');
         return;
       }
 
       this._svc('bhyve', 'set_manual_preset_runtime', { entity_id: zones, minutes: next })
         .then(() => { this._presetLocal = false; })
-        .catch(() => {
-          this._presetLocal = true;
-          this._toast = 'This device did not accept a preset run time — using ' +
-                        next + ' min for this card only, until you reload.';
-          this._render();
+        .catch(err => {
+          failed(err && err.message ? err.message : 'service call rejected');
           setTimeout(() => { this._toast = null; this._render(); }, 8000);
         });
     }
@@ -1446,6 +1479,7 @@
     entity:       'Zone valve (or flood sensor)',
     name:         'Name override',
     run_time:     'Run time (minutes)',
+    show_programs: 'Show smart watering and programs',
   };
 
   class BhyveEditorBase extends HTMLElement {
@@ -1529,6 +1563,7 @@
         { name: 'name',     selector: { text: {} } },
         { name: 'run_time', selector: { number: { min: 1, max: 60, mode: 'box',
                                                   unit_of_measurement: 'min' } } },
+        { name: 'show_programs', selector: { boolean: {} } },
       ];
     }
     _hint() {
