@@ -4,3 +4,6 @@ node_modules/
 *.swo
 
 *.idea
+# Scratch output from the render harness
+tools/shots/
+tools/exports/

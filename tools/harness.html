@@ -1,0 +1,295 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>B-hyve cards harness</title>
+<style>
+  html,body{margin:0;padding:0;background:#f2f4f7;font-family:Roboto,system-ui,-apple-system,sans-serif}
+  *,*::before,*::after{box-sizing:border-box}
+  .wrap{display:flex;gap:40px;padding:32px;align-items:flex-start}
+  .col{width:var(--colw,380px);flex:0 0 auto;padding:16px;border-radius:16px;display:flex;flex-direction:column;gap:18px}
+  .col.light{background:#f2f4f7}
+  .col.dark{background:#111111}
+  .col.teal{background:#f2f4f7}
+  .colhead{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:2px}
+  .light .colhead,.teal .colhead{color:#5a5f66}
+  .dark .colhead{color:#8b8f94}
+  .cap{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;margin:0 4px 6px}
+  .light .cap,.teal .cap{color:#6b6f74}
+  .dark .cap{color:#a8abae}
+
+  /* Home Assistant theme variables — real defaults from the HA frontend. */
+  .light,.teal{
+    --primary-text-color:#212121; --secondary-text-color:#727272;
+    --card-background-color:#ffffff; --ha-card-background:#ffffff;
+    --ha-card-border-radius:12px; --divider-color:rgba(0,0,0,.12);
+    --ha-card-box-shadow:0px 2px 4px 0px rgba(0,0,0,.06),0px 1px 2px 0px rgba(0,0,0,.04);
+  }
+  .dark{
+    --primary-text-color:#e1e1e1; --secondary-text-color:#9b9b9b;
+    --card-background-color:#1c1c1c; --ha-card-background:#1c1c1c;
+    --ha-card-border-radius:12px; --divider-color:rgba(255,255,255,.12);
+    --ha-card-box-shadow:none;
+  }
+</style></head>
+<body>
+<div class="wrap" id="wrap"></div>
+
+<script src="icons.js"></script>
+<script>
+// ── Stand-ins for the two HA frontend elements the cards rely on ───────────
+class HaCard extends HTMLElement {
+  constructor(){ super(); this.attachShadow({mode:'open'}).innerHTML =
+    '<style>:host{display:block;background:var(--ha-card-background,var(--card-background-color,#fff));'+
+    'border-radius:var(--ha-card-border-radius,12px);box-shadow:var(--ha-card-box-shadow,none);'+
+    'color:var(--primary-text-color)}</style><slot></slot>'; }
+}
+customElements.define('ha-card', HaCard);
+
+class HaIcon extends HTMLElement {
+  static get observedAttributes(){ return ['icon']; }
+  constructor(){ super(); this.attachShadow({mode:'open'}); }
+  connectedCallback(){ this._draw(); }
+  attributeChangedCallback(){ this._draw(); }
+  _draw(){
+    const name = this.getAttribute('icon')||'';
+    const p = (window.MDI_PATHS||{})[name];
+    if (!p) console.warn('MISSING ICON', name);
+    this.shadowRoot.innerHTML =
+      '<style>:host{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;'+
+      'width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px)}'+
+      'svg{width:100%;height:100%;fill:currentColor;display:block}</style>'+
+      '<svg viewBox="0 0 24 24"><path d="'+(p||'')+'"></path></svg>';
+  }
+}
+customElements.define('ha-icon', HaIcon);
+
+// ── Mushroom token simulation ─────────────────────────────────────────────
+// Mushroom itself only reads --mush-rgb-*; it never sets them. They exist
+// solely as a theme override hook, so this switch models the three real cases.
+const MODE = new URLSearchParams(location.search).get('mush') || 'none';
+const PALETTES = {
+  design: {blue:'33, 150, 243', green:'76, 175, 80', orange:'255, 152, 0',
+           red:'244, 67, 54', purple:'146, 107, 199', grey:'158, 158, 158'},
+  teal:   {blue:'0, 150, 136', green:'0, 200, 83', orange:'255, 111, 34',
+           red:'213, 0, 0', purple:'110, 65, 171', grey:'96, 125, 139'},
+};
+if (PALETTES[MODE]) {
+  const p = PALETTES[MODE];
+  Object.keys(p).forEach(k =>
+    document.documentElement.style.setProperty('--mush-rgb-'+k, p[k]));
+}
+</script>
+
+<script src="bhyve-cards.js"></script>
+
+<script>
+// ── Mock Home Assistant ───────────────────────────────────────────────────
+const DEV1='dev-controller', DEV2='dev-flood';
+const REG_ENTITIES=[
+ ['valve.front_lawn',DEV1],['valve.garden_beds',DEV1],['valve.side_strip',DEV1],['valve.back_lawn',DEV1],
+ ['binary_sensor.front_lawn_connected',DEV1],['binary_sensor.garden_beds_connected',DEV1],
+ ['binary_sensor.side_strip_connected',DEV1],['binary_sensor.back_lawn_connected',DEV1],
+ ['sensor.front_lawn_battery_level',DEV1],['sensor.garden_beds_battery_level',DEV1],
+ ['sensor.side_strip_battery_level',DEV1],
+ ['sensor.front_lawn_zone_history',DEV1],['sensor.garden_beds_zone_history',DEV1],
+ ['sensor.side_strip_zone_history',DEV1],
+ ['binary_sensor.bhyve_xr_fault',DEV1],['switch.bhyve_xr_rain_delay',DEV1],
+ ['switch.front_lawn_smart_watering',DEV1],
+ ['switch.bhyve_xr_a_program',DEV1],['switch.bhyve_xr_b_program',DEV1],['switch.bhyve_xr_e_program',DEV1],
+ ['select.bhyve_xr_device_mode',DEV1],['sensor.bhyve_xr_next_watering',DEV1],
+ ['binary_sensor.basement_flood_sensor',DEV2],['sensor.basement_temperature',DEV2],
+ ['sensor.basement_signal_strength',DEV2],['sensor.basement_battery_level',DEV2],
+].map(([entity_id,device_id])=>({entity_id,device_id,platform:'bhyve'}));
+const REG_DEVICES=[
+ {id:DEV1,name:'Front Yard',name_by_user:null,model:'B-hyve XR'},
+ {id:DEV2,name:'Basement',name_by_user:null,model:'Flood Sensor'}];
+
+const NOW=Date.now();
+const future=new Date(NOW+36e5).toISOString();
+const st=(state,attributes,extra)=>Object.assign(
+  {state,attributes:attributes||{},last_changed:new Date(NOW).toISOString()},extra||{});
+
+function baseStates(){return{
+ 'valve.front_lawn':st('open',{station:1,zone_name:'Front Lawn',manual_preset_runtime:10,
+   started_watering_station_at:new Date(NOW-228000).toISOString(),next_start_time:future}),
+ 'valve.garden_beds':st('closed',{station:2,zone_name:'Garden Beds',next_start_time:future}),
+ 'valve.side_strip':st('closed',{station:3,zone_name:'Side Strip',next_start_time:future}),
+ 'valve.back_lawn':st('unavailable',{station:4,zone_name:'Back Lawn'},
+   {last_changed:new Date(NOW-3*86400000).toISOString()}),
+ 'binary_sensor.front_lawn_connected':st('on'),
+ 'binary_sensor.garden_beds_connected':st('off'),
+ 'binary_sensor.side_strip_connected':st('on'),
+ 'binary_sensor.back_lawn_connected':st('off'),
+ 'sensor.front_lawn_battery_level':st('85'),
+ 'sensor.garden_beds_battery_level':st('72'),
+ 'sensor.side_strip_battery_level':st('18'),
+ 'sensor.front_lawn_zone_history':st('ok',{run_time:12,consumption_gallons:18.4}),
+ 'sensor.garden_beds_zone_history':st('ok',{run_time:8,consumption_gallons:11.2}),
+ 'sensor.side_strip_zone_history':st('ok',{run_time:3,consumption_gallons:2.1}),
+ 'binary_sensor.bhyve_xr_fault':st('off',{station_faults:[]}),
+ 'switch.bhyve_xr_rain_delay':st('off',{delay:48,cause:'wind'}),
+ 'switch.front_lawn_smart_watering':st('on',{soil_moisture_level:61}),
+ 'switch.bhyve_xr_a_program':st('on',{friendly_name:'Program A',frequency:{days:[1,3,5]},
+   start_times:['06:00'],run_times:[{station:1,run_time:10},{station:2,run_time:8}]}),
+ 'switch.bhyve_xr_b_program':st('off',{friendly_name:'Program B',frequency:{interval:4},
+   start_times:['04:15'],run_times:[{station:2,run_time:25}]}),
+ 'switch.bhyve_xr_e_program':st('on',{friendly_name:'Program E',is_smart_program:true,
+   run_times:[{station:1,run_time:12}]}),
+ 'select.bhyve_xr_device_mode':st('auto',{options:['auto','off']}),
+ 'sensor.bhyve_xr_next_watering':st(future,{programs:['a']}),
+ 'binary_sensor.basement_flood_sensor':st('off',{device_class:'moisture'}),
+ 'sensor.basement_temperature':st('68',{unit_of_measurement:'°F'}),
+ 'sensor.basement_signal_strength':st('-63'),
+ 'sensor.basement_battery_level':st('92'),
+};}
+
+const SERVICES={bhyve:{start_watering:{},stop_watering:{},enable_rain_delay:{},
+  disable_rain_delay:{},set_manual_preset_runtime:{}},select:{select_option:{}},
+  homeassistant:{turn_on:{},turn_off:{}},valve:{open_valve:{},close_valve:{}}};
+
+function makeHass(mutate){
+  const states=baseStates();
+  if(mutate) mutate(states);
+  return {states,services:SERVICES,
+    callService(){return Promise.resolve();},
+    callWS(m){return Promise.resolve(
+      m.type==='config/entity_registry/list'?REG_ENTITIES:REG_DEVICES);}};
+}
+
+// ── Mount ─────────────────────────────────────────────────────────────────
+const SPECS=[
+ ['Controller · drawer collapsed','bhyve-controller-card',{},null,null],
+ ['Controller · drawer expanded','bhyve-controller-card',{},null,c=>{c._expanded=true;c._render();}],
+ ['Controller · device off','bhyve-controller-card',{},
+   s=>{s['select.bhyve_xr_device_mode']=st('off',{options:['auto','off']});
+       s['valve.front_lawn']=st('closed',{station:1,zone_name:'Front Lawn',next_start_time:future});},null],
+ ['Controller · fault detected','bhyve-controller-card',{},
+   s=>{s['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});},null],
+ ['Zone · idle','bhyve-zone-card',{entity:'valve.garden_beds'},null,null],
+ ['Zone · running','bhyve-zone-card',{entity:'valve.front_lawn'},null,null],
+ ['Zone · fault','bhyve-zone-card',{entity:'valve.side_strip'},
+   s=>{s['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});},null],
+ ['Zone · unavailable','bhyve-zone-card',{entity:'valve.back_lawn'},null,null],
+ ['Zone · rain delay active','bhyve-zone-card',{entity:'valve.front_lawn'},
+   s=>{s['switch.bhyve_xr_rain_delay']=st('on',{delay:48,cause:'wind'});},null],
+ ['Flood · dry','bhyve-zone-card',{entity:'binary_sensor.basement_flood_sensor'},null,null],
+ ['Flood · water detected','bhyve-zone-card',{entity:'binary_sensor.basement_flood_sensor'},
+   s=>{s['binary_sensor.basement_flood_sensor']=st('on',{device_class:'moisture'});},null],
+ ['Empty · nothing found','bhyve-controller-card',{device_id:'no-such-device'},null,null],
+];
+
+const Q=new URLSearchParams(location.search);
+const ONLY=Q.get('state');
+if(Q.get('w')) document.documentElement.style.setProperty('--colw',Q.get('w')+'px');
+const PICK = ONLY ? SPECS.filter(s=>s[0].toLowerCase().includes(ONLY.toLowerCase())) : SPECS;
+
+const PREVIEW = Q.get('preview')==='1';
+const COLS=[['light','Light theme'],['dark','Dark theme']];
+if (MODE==='teal') COLS.push(['teal','Light · --mush-rgb-* override']);
+
+// ── Composed exports for docs/ ────────────────────────────────────────────
+const THEME_VARS = {
+  light:'--primary-text-color:#212121;--secondary-text-color:#727272;'+
+        '--card-background-color:#fff;--ha-card-background:#fff;'+
+        '--ha-card-border-radius:12px;--divider-color:rgba(0,0,0,.12);'+
+        '--ha-card-box-shadow:0px 2px 4px 0px rgba(0,0,0,.06),0px 1px 2px 0px rgba(0,0,0,.04);',
+  dark: '--primary-text-color:#e1e1e1;--secondary-text-color:#9b9b9b;'+
+        '--card-background-color:#1c1c1c;--ha-card-background:#1c1c1c;'+
+        '--ha-card-border-radius:12px;--divider-color:rgba(255,255,255,.12);'+
+        '--ha-card-box-shadow:none;',
+};
+const PAGE_BG = {light:'#f2f4f7', dark:'#111111'};
+const CAP_COLOR = {light:'#6b6f74', dark:'#a8abae'};
+
+const offMode = s2 => {
+  s2['select.bhyve_xr_device_mode']=st('off',{options:['auto','off']});
+  s2['valve.front_lawn']=st('closed',{station:1,zone_name:'Front Lawn',next_start_time:future});
+};
+const faultOn = s2 => {
+  s2['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});
+};
+const wet = s2 => {
+  s2['binary_sensor.basement_flood_sensor']=st('on',{device_class:'moisture'});
+};
+const expand = c => { c._expanded=true; c._render(); };
+
+const CTRL='bhyve-controller-card', ZN='bhyve-zone-card';
+const RECIPES = {
+  preview: {theme:'light', cols:[
+    [{tag:CTRL,cfg:{}}],
+    [{tag:ZN,cfg:{entity:'valve.front_lawn'}},{tag:ZN,cfg:{entity:'valve.garden_beds'}}]]},
+  'preview-dark': {theme:'dark', cols:[
+    [{tag:CTRL,cfg:{}}],
+    [{tag:ZN,cfg:{entity:'valve.front_lawn'}},{tag:ZN,cfg:{entity:'valve.garden_beds'}}]]},
+  'controller-card': {theme:'light', cols:[
+    [{tag:CTRL,cfg:{},after:expand}]]},
+  'zone-card-states': {theme:'light', caps:true, cols:[
+    [{cap:'Idle',tag:ZN,cfg:{entity:'valve.garden_beds'}},
+     {cap:'Fault',tag:ZN,cfg:{entity:'valve.side_strip'},mutate:faultOn}],
+    [{cap:'Running',tag:ZN,cfg:{entity:'valve.front_lawn'}},
+     {cap:'Unavailable',tag:ZN,cfg:{entity:'valve.back_lawn'}}]]},
+  'zone-card-off': {theme:'light', cols:[
+    [{tag:CTRL,cfg:{},mutate:offMode}],
+    [{tag:ZN,cfg:{entity:'valve.front_lawn'},mutate:offMode}]]},
+  'flood-sensor': {theme:'light', caps:true, cols:[
+    [{cap:'Dry',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'}}],
+    [{cap:'Water detected',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'},mutate:wet}]]},
+  'preview-mobile': {theme:'light', colw:343, pad:16, cols:[
+    [{tag:CTRL,cfg:{}},{tag:ZN,cfg:{entity:'valve.front_lawn'}}]]},
+  'empty-state': {theme:'light', cols:[
+    [{tag:CTRL,cfg:{device_id:'no-such-device'}}]]},
+};
+
+const COMPOSE = Q.get('compose');
+if (PREVIEW || COMPOSE) {
+  const key = COMPOSE || (Q.get('mobile')==='1' ? 'preview-mobile' : 'preview');
+  const r = RECIPES[key] || RECIPES.preview;
+  document.body.innerHTML='<div id="pv"></div>';
+  document.body.style.background=PAGE_BG[r.theme];
+  const pv=document.getElementById('pv');
+  pv.style.minHeight='100vh';
+  pv.style.cssText='display:flex;gap:20px;align-items:flex-start;padding:'+
+    (r.pad||28)+'px;background:'+PAGE_BG[r.theme]+';'+THEME_VARS[r.theme];
+  r.cols.forEach(col=>{
+    const d=document.createElement('div');
+    d.style.cssText='width:'+(r.colw||380)+'px;flex:0 0 auto;'+
+      'display:flex;flex-direction:column;gap:'+(r.pad?16:20)+'px';
+    col.forEach(spec=>{
+      const box=document.createElement('div');
+      if (r.caps && spec.cap) {
+        box.innerHTML='<div style="font-size:11px;font-weight:600;letter-spacing:.08em;'+
+          'text-transform:uppercase;margin:0 4px 6px;color:'+CAP_COLOR[r.theme]+'">'+spec.cap+'</div>';
+      }
+      const e=document.createElement(spec.tag);
+      e.setConfig(spec.cfg);
+      e.hass=makeHass(spec.mutate);
+      if (spec.after) setTimeout(()=>spec.after(e),200);
+      box.appendChild(e); d.appendChild(box);
+    });
+    pv.appendChild(d);
+  });
+  throw new Error('compose-mode-stop');
+}
+
+const wrap=document.getElementById('wrap');
+COLS.forEach(([cls,label])=>{
+  const col=document.createElement('div');
+  col.className='col '+cls;
+  col.innerHTML='<div class="colhead">'+label+'</div>';
+  if (cls==='teal') {
+    const p=PALETTES.teal;
+    Object.keys(p).forEach(k=>col.style.setProperty('--mush-rgb-'+k,p[k]));
+  }
+  PICK.forEach(([cap,tag,cfg,mutate,after])=>{
+    const box=document.createElement('div');
+    box.innerHTML='<div class="cap">'+cap+'</div>';
+    const el=document.createElement(tag);
+    el.setConfig(cfg);
+    el.hass=makeHass(mutate);
+    box.appendChild(el);
+    col.appendChild(box);
+    if (after) setTimeout(()=>after(el),200);
+  });
+  wrap.appendChild(col);
+});
+setTimeout(()=>{document.title='READY';},900);
+</script>
+</body></html>
