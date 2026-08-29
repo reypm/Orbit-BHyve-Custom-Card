@@ -6,7 +6,8 @@
 // Both card types live in this one file so HACS ships a single JS resource and
 // Lovelace has no resource-ordering problem. See README "Why one file".
 //
-// Design source: "BHyve Card Family v3" (Claude Design project 9c531b4e).
+// Design source: "BHyve Card Family" (Claude Design project 9c531b4e) — the
+// controller card follows the v5b states, the zone card the v4 ones.
 // Integration:   https://github.com/sebr/bhyve-home-assistant
 // Repository:    https://github.com/reypm/Orbit-BHyve-Custom-Card
 // =============================================================================
@@ -14,7 +15,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION   = '4.0.0';
+  const CARD_VERSION   = '4.1.0';
   const CONTROLLER     = 'bhyve-controller-card';
   const ZONE           = 'bhyve-zone-card';
   const CONTROLLER_ED  = 'bhyve-controller-card-editor';
@@ -214,6 +215,34 @@
   `;
 
   const CONTROLLER_STYLES = `
+    /* ── Hub dot ─────────────────────────────────────────────────────
+       Hub status is a property of the device, so it rides on the device's own
+       icon rather than costing a row or a chip. It is the only ambient
+       indicator on the card: a second one and neither reads as a status light.
+       The ring is the card background, which follows the theme. */
+    .icon-wrap { position: relative; flex: 0 0 auto; }
+    .hub-dot {
+      position: absolute; right: -1px; bottom: -1px; display: block;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: rgb(${RGB.green});
+      box-shadow: 0 0 0 2px var(--ha-card-background, var(--card-background-color, #fff));
+    }
+    .hub-dot.off { background: rgb(${RGB.red}); }
+
+    /* The Next run sub-line names the zone, which is the whole point of it, and
+       does not fit on one 380px line. Status rows have no control on the right
+       to collide with, so their sub-line wraps rather than ellipses. */
+    .drawer .row .secondary.wrap { white-space: normal; }
+
+    /* Status rows are read-only. The right edge carries the value as plain
+       text: four rows with an empty column where their neighbours have
+       switches read as controls that failed to load. */
+    .stat-val {
+      flex: 0 0 auto; padding-right: 4px;
+      font-size: 14px; font-weight: 500; letter-spacing: .1px;
+      color: var(--primary-text-color); font-variant-numeric: tabular-nums;
+    }
+
     .seg {
       display: flex; background: var(--bh-shape); border-radius: 12px;
       padding: 3px; flex: 0 0 auto;
@@ -558,6 +587,10 @@
       name:          c.name || (dev ? (dev.name_by_user || dev.name) : null) || 'B-hyve',
       zones:         sortByStation(hass, ids.filter(id => id.startsWith('valve.'))),
       mode:          c.device_mode_entity  || one('_device_mode', 'select'),
+      // A device has one bridge, so unlike the zone card there is nothing to
+      // match per zone here — the first _connected sensor is the hub.
+      hub:           c.hub_entity          || one('_connected', 'binary_sensor'),
+      signal:        c.signal_entity       || one('_signal_strength', 'sensor'),
       nextWatering:  c.next_watering_entity || one('_next_watering', 'sensor'),
       rainDelay:     c.rain_delay_entity   || one('_rain_delay', 'switch'),
       fault:         c.fault_entity        || one('_fault', 'binary_sensor'),
@@ -1298,8 +1331,9 @@
       }
 
       const showActions  = this._config.show_actions !== false;
-      // show_actions already suppressed the drawer as part of hiding every
-      // control; show_programs drops it on its own while leaving Run/Stop.
+      // Both options gate the drawer's controls block — programs, rain delay,
+      // run time. Neither touches the Status section: device health is not a
+      // control, and hiding the programs list was never meant to take it down.
       const showPrograms = this._config.show_programs !== false;
       const running     = zones.filter(z => this._isOn(z));
       const rainOn      = !!dev.rainDelay && this._isOn(dev.rainDelay);
@@ -1319,11 +1353,21 @@
                      _registry.devices[deviceId].model) || 'B-hyve';
       const title = this._config.title || dev.name;
 
+      // Rendered in both drawer states — it is the whole of "hub status is
+      // always visible" now that the summary chip row is gone.
+      const hubOnline = dev.hub ? this._isOn(dev.hub) : null;
+      const hubDot = hubOnline == null ? '' :
+        `<span class="hub-dot${hubOnline ? '' : ' off'}"
+               title="${hubOnline ? 'Hub online' : 'Hub offline'}"></span>`;
+
       this.shadowRoot.innerHTML = `
         <style>${BASE_STYLES}${CONTROLLER_STYLES}</style>
         <ha-card class="${anyFault ? 'accent-red' : ''}">
           <div class="row head">
-            ${shapeHtml(ICON.controller, accent, 'lg')}
+            <div class="icon-wrap">
+              ${shapeHtml(ICON.controller, accent, 'lg')}
+              ${hubDot}
+            </div>
             <div class="grow">
               <div class="primary">${esc(title)}</div>
               <div class="secondary">${esc(model + ' · ' + status)}</div>
@@ -1339,8 +1383,7 @@
             <span>${esc(faultText(this._hass, dev.fault, null) || 'A station reports a fault.')}</span></div>` : ''}
           ${this._toast ? `<div class="toast">${esc(this._toast)}</div>` : ''}
           <div class="zone-rows">${this._zoneRows(zones, showActions, off)}</div>
-          <div class="chips">${this._chips(dev, zones)}</div>
-          ${showActions && showPrograms ? this._drawer(dev, zones) : ''}
+          ${this._drawer(dev, zones, showActions && showPrograms)}
         </ha-card>`;
 
       this._bind(dev, zones);
@@ -1402,43 +1445,153 @@
       }).join('');
     }
 
-    _chips(dev, zones) {
-      const out = [];
+    // Next scheduled run for the controller as a whole, plus the zone it
+    // belongs to. The device sensor supplies the time when it has one, but the
+    // zone name only exists in the per-zone next_start_time attributes, so
+    // those are scanned either way.
+    _nextRun(dev, zones) {
+      const soonest = zones
+        .map(z => ({ z: z, d: new Date(this._attr(z, 'next_start_time') || '') }))
+        .filter(x => !isNaN(x.d.getTime()) && x.d > new Date())
+        .sort((a, b) => a.d - b.d)[0];
 
       const nextSt = this._st(dev.nextWatering);
-      let next = nextSt && !['unavailable', 'unknown', ''].includes(nextSt.state)
-        ? relativeFuture(nextSt.state) : null;
-      if (!next) {
-        // Fall back to the soonest next_start_time across this device's zones.
-        const times = zones.map(z => this._attr(z, 'next_start_time'))
-          .map(v => (v ? new Date(v) : null))
-          .filter(d => d && !isNaN(d.getTime()) && d > new Date())
-          .sort((a, b) => a - b);
-        if (times.length) next = relativeFuture(times[0]);
+      const text = (nextSt && !['unavailable', 'unknown', ''].includes(nextSt.state)
+        ? relativeFuture(nextSt.state) : null)
+        || (soonest ? relativeFuture(soonest.d) : null);
+
+      return { text: text, zone: soonest ? this._zoneName(soonest.z) : null };
+    }
+
+    // Weekly volume comes from statistics helpers the user creates, so there is
+    // nothing to discover. weekly_volume_entity takes either one device-level
+    // helper or a per-zone list; a list covering fewer entities than the card
+    // has zones is a partial total and says so, rather than passing a subset
+    // off as the controller's whole water use.
+    _weeklyTotal(dev, zones) {
+      const cfg = dev.weeklyVolume;
+      const ids = (Array.isArray(cfg) ? cfg : [cfg]).filter(Boolean);
+      if (!ids.length) return null;
+
+      let total = 0, counted = 0, unit = null;
+      ids.forEach(id => {
+        const v = num(this._st(id) && this._st(id).state);
+        if (v == null) return;
+        total += v;
+        counted++;
+        unit = unit || this._attr(id, 'unit_of_measurement');
+      });
+      if (!counted || total <= 0) return null;
+
+      return {
+        text: total.toFixed(1) + ' ' + (unit || 'gal'),
+        // A single helper is the device total by definition; only an explicit
+        // per-zone list can be missing zones.
+        note: Array.isArray(cfg) && counted < zones.length
+          ? counted + ' of ' + zones.length + ' zones'
+          : 'All zones combined',
+      };
+    }
+
+    // The four device-level facts that used to be the summary chip row, now
+    // read-only rows at the top of the drawer. A row is omitted when its data
+    // is missing, exactly as its chip was.
+    _statusRows(dev, zones) {
+      const rows = [];
+      const row = (icon, rgb, title, note, value) => `
+        <div class="row">
+          ${shapeHtml(icon, rgb)}
+          <div class="grow">
+            <div class="primary">${esc(title)}</div>
+            <div class="secondary wrap">${esc(note)}</div>
+          </div>
+          <span class="stat-val">${esc(value)}</span>
+        </div>`;
+
+      if (dev.hub) {
+        const on   = this._isOn(dev.hub);
+        const hSt  = this._st(dev.hub);
+        const sig  = num(this._st(dev.signal) && this._st(dev.signal).state);
+        const seen = hSt ? fmtTime(new Date(hSt.last_changed)) : null;
+        // Signal strength is not exposed by every device — drop that half of
+        // the line rather than showing a placeholder for it.
+        const note = on
+          ? ['Wi-Fi bridge', sig != null ? sig + ' dBm' : null].filter(Boolean).join(' · ')
+          : ['Not reachable', seen ? 'last seen ' + seen : null].filter(Boolean).join(' · ');
+        rows.push(row(on ? ICON.wifi : ICON.wifiOff, on ? RGB.green : RGB.red,
+                      'Hub', note, on ? 'Online' : 'Offline'));
       }
-      if (next) out.push(chipHtml(ICON.clock, 'Next ' + next, RGB.grey, false));
 
       const battery = num(this._st(dev.battery) && this._st(dev.battery).state);
       if (battery != null) {
         const low = battery <= 20;
-        out.push(chipHtml(batteryIcon(battery), Math.round(battery) + '%',
-                          low ? RGB.orange : RGB.green, low));
+        // The integration reports a level and nothing else — no charging state
+        // to describe, so the sub-line only names what the level belongs to.
+        rows.push(row(batteryIcon(battery), low ? RGB.orange : RGB.green,
+                      'Battery', 'Controller', Math.round(battery) + '%'));
       }
 
-      const week = num(this._st(dev.weeklyVolume) && this._st(dev.weeklyVolume).state);
-      if (dev.weeklyVolume && week != null && week > 0) {
-        out.push(chipHtml(ICON.chart, week.toFixed(1) + ' gal this week', RGB.grey, false));
+      const next = this._nextRun(dev, zones);
+      if (next.text) {
+        rows.push(row(ICON.clock, RGB.grey, 'Next run',
+          ['Earliest across all zones', next.zone].filter(Boolean).join(' · '),
+          next.text));
       }
-      return out.join('');
+
+      const week = this._weeklyTotal(dev, zones);
+      if (week) rows.push(row(ICON.chart, RGB.grey, 'This week', week.note, week.text));
+
+      return rows;
     }
 
-    _drawer(dev, zones) {
-      const n    = (dev.programs || []).length;
-      const hint = [n + ' program' + (n === 1 ? '' : 's'), 'rain delay', 'run time'].join(' · ');
-      const open = this._expanded;
+    // The drawer holds two independent things.
+    //
+    // The Status section is read-only device health. Nothing gates it: the
+    // "hub and device health are always reachable" rule outranks the two
+    // options, both of which are about controls — show_actions hides Run/Stop,
+    // show_programs hides the programs list. Hiding either used to take Status
+    // down with it, which is the bug this shape exists to prevent. Only a
+    // config option written specifically for Status could hide it, and there
+    // isn't one.
+    //
+    // The controls block below it — programs, rain delay, run time — is what
+    // those two options gate, exactly as before.
+    //
+    // The toggle row renders when either part has something in it, so the
+    // collapsed card stays as compact as it was and Status is still one tap
+    // away rather than always on screen.
+    _drawer(dev, zones, controls) {
+      const status = this._statusRows(dev, zones);
+      if (!status.length && !controls) return '';
+
+      const n      = (dev.programs || []).length;
+      // With only Status inside, the label already names it and the sub-line
+      // would just say "Status" under "Show status".
+      const hint   = controls
+        ? (status.length ? ['Status'] : [])
+            .concat([n + ' program' + (n === 1 ? '' : 's'), 'rain delay', 'run time'])
+            .join(' · ')
+        : '';
+      // And the row would otherwise offer to show settings that are not there.
+      const label  = controls ? 'programs &amp; settings' : 'status';
+      const open   = this._expanded;
 
       if (!open) {
-        return this._drawerBtn(hint, false);
+        return this._drawerBtn(hint, false, label);
+      }
+
+      const statusHtml = status.length ? `
+          <div class="drawer-title">
+            <b>Status · all zones</b>
+            <span>Read-only. One row per device-level fact — nothing here is
+            per zone.</span>
+          </div>
+          ${status.join('')}
+          ${controls ? '<div class="hr"></div>' : ''}` : '';
+
+      if (!controls) {
+        return this._drawerBtn(hint, true, label) +
+          `<div class="drawer">${statusHtml}</div>`;
       }
 
       const programs = (dev.programs || []).map(pid => {
@@ -1466,8 +1619,9 @@
 
       const minutes = this._presetMinutes(zones);
 
-      return this._drawerBtn(hint, true) + `
+      return this._drawerBtn(hint, true, label) + `
         <div class="drawer">
+          ${statusHtml}
           <div class="drawer-title">
             <b>Programs · all zones</b>
             <span>Every program on this controller, merged — programs are
@@ -1500,13 +1654,13 @@
         </div>`;
     }
 
-    _drawerBtn(hint, open) {
+    _drawerBtn(hint, open, label) {
       return `
         <button class="drawer-btn${open ? ' open' : ''}" data-act="drawer">
           <ha-icon icon="${ICON.tune}"></ha-icon>
           <span class="label">
-            <b>${open ? 'Hide' : 'Show'} programs &amp; settings</b>
-            <span>${esc(hint)}</span>
+            <b>${open ? 'Hide' : 'Show'} ${label || 'programs &amp; settings'}</b>
+            ${hint ? `<span>${esc(hint)}</span>` : ''}
           </span>
           <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
         </button>`;
@@ -1668,6 +1822,7 @@
     _hint() {
       return 'Leave the device empty to use the first B-hyve controller found. ' +
              'Entity overrides (<code>device_mode_entity</code>, <code>rain_delay_entity</code>, ' +
+             '<code>hub_entity</code>, <code>signal_entity</code>, ' +
              '<code>weekly_volume_entity</code>, <code>zones</code>) are YAML-only for now.';
     }
   }

@@ -1,8 +1,9 @@
 # Design decisions
 
 The authoritative source for how these cards look and behave is the Claude Design
-project **"BHyve Card Family v3"** (`BHyve Card Family v3.dc.html`, project
-`9c531b4e-77f8-4416-b3d0-450f12192eff`).
+project **"BHyve Card Family"** (project `9c531b4e-77f8-4416-b3d0-450f12192eff`). The
+zone card follows `BHyve Card Family v4.dc.html`; the controller card follows the v5b
+states in `BHyve Card Family v5.dc.html`.
 
 Several details in that design differ from the plain-language spec the v3 work was
 briefed with. The design won in every case. This file records each one so a later
@@ -21,6 +22,50 @@ repo owner says otherwise in writing.**
 | 6 | **Status indicator** | A status dot plus text | **No dot.** State is carried by the shape icon's tint plus the secondary text line | Tinted shape icon + text |
 | 7 | **Accent blue** | Unspecified | **`33, 150, 243`** — which is exactly Mushroom's `--default-blue`. (v2 used `3, 169, 244`, Mushroom's `--default-light-blue`) | `--mush-rgb-blue`, fallback `33, 150, 243` |
 | 8 | **Controller "Off" state** | Not in the status list | **An orange banner:** "Controller is off — no program will run.", orange shape icon, and the `Off` segment filled | Implemented |
+
+---
+
+## v5b — the controller summary moves into the drawer
+
+The controller card's summary chip row (hub, battery, next run, weekly volume) repeated
+the same device-level facts on every controller card on a dashboard, and duplicated hub
+status against the v4 zone-card work. The design project offered two answers and the repo
+owner picked **v5b**: no chip row at all, the stats as read-only rows inside the drawer,
+and hub status as a dot on the header icon. The v5a alternative — a regrouped chip row —
+was **not** selected; do not reintroduce it, and do not ship both. Putting the same four
+facts on screen twice is the thing v5 exists to stop.
+
+| # | Item | The obvious move | The design specifies | Shipped |
+|---|---|---|---|---|
+| 9 | **Removing the hub chip** | Delete it; the drawer has a Hub row now | **Neither a flat removal nor a badge.** A flat removal would put hub status behind a tap, breaking the v3 rule that an offline hub is never hidden. A badge still spends dedicated space to say "nothing is wrong". Instead hub status becomes a property of the thing it describes: a **12 px dot** on the header's 40 px device icon, offset `right`/`bottom: -1px`, ringed 2 px in the card background | `.hub-dot`, green online / red offline, rendered in both drawer states |
+| 10 | **Which stats get an indicator** | One per stat | **Only hub.** Battery, next run and weekly volume move into the drawer with no above-the-fold trace — none of them is ever the explanation for something else looking wrong. The moment there are two dots, neither reads as a status light | One dot, bound to `binary_sensor.*_connected` |
+| 11 | **Where the Status section goes** | Wherever it fits | **First, above Programs.** It preserves the card's reading order — the stats used to sit just above the drawer handle — and separates by interactivity: read-only rows, divider, then everything you can act on | `Status · all zones` → `hr` → `Programs · all zones` → rain delay → run time |
+| 12 | **Making read-only obvious** | Leave the right edge empty, or show a disabled switch | **A plain right-aligned value.** Four rows with nothing where their neighbours have switches read as controls that failed to load; a value in that column reads unmistakably as data. 14 px / 500, tabular numerals, no fill, no border, no chevron, no hover | `.stat-val` |
+| 13 | **Colour in the section** | Tint the values | **Hub only, and on its icon circle, not its value.** It is the one row that carries colour, for the same reason its chip did | Green/red shape on the Hub row; every value in `--primary-text-color` |
+
+### What was scoped out of this round
+
+- **The offline escalation** — the design's `v5b · Hub offline` state pairs the red dot
+  with a `Hub offline` secondary line and a red banner that outranks the controller-off
+  banner. Only the dot's red state ships. The controller card never carried a hub chip to
+  begin with, so nothing was lost relative to v4, but the louder offline treatment is
+  still on the table.
+- **The v5 zone-card changes** — `show_hub_status: offline_only|always|never`,
+  `show_battery: low_only|always|never`, and the suppression/per-zone chip split. The zone
+  card is untouched at v4.
+
+### Where the implementation extends the design
+
+The design's Next run sub-line, "Earliest across all zones · Front Lawn", does not fit on
+one line in a 380 px card. Rather than drop the zone name — the entire reason the sub-line
+exists — status-row sub-lines wrap to a second line. They have no control on the right to
+collide with, so nothing else moves.
+
+The design's Battery sub-line reads "Controller · discharging". The integration exposes a
+battery *level* and nothing else; there is no charging state to report, so the sub-line
+ships as just "Controller" rather than asserting something no entity backs. Likewise the
+Hub sub-line's "· −58 dBm" half is appended only when a signal-strength entity actually
+resolves, and omitted cleanly when none does.
 
 ---
 

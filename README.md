@@ -97,21 +97,33 @@ show_actions: true         # optional — default true
 show_programs: true        # optional — default true
 ```
 
-<img src="docs/controller-card.png" width="380"
-     alt="BHyve controller card with the drawer expanded, showing the device header with Auto/Off control, four compact zone rows, summary chips, and the drawer contents: the merged programs list, the rain delay row, and the run time stepper">
+| Collapsed | Collapsed · dark |
+|---|---|
+| ![BHyve controller card with the drawer collapsed: device header with a green hub-status dot on its icon, four compact zone rows, and the show programs and settings row — no chip row in between](docs/controller-collapsed.png) | ![The same collapsed controller card rendered in dark theme, the hub dot still green against the dark card](docs/controller-collapsed-dark.png) |
 
-Top to bottom — every element below is visible in the screenshot, which has the drawer
-expanded:
+| Expanded | Expanded · dark |
+|---|---|
+| ![BHyve controller card with the drawer expanded, showing the read-only Status · all zones section — Hub, Battery, Next run and This week — above the merged programs list, the rain delay row and the run time stepper](docs/controller-card.png) | ![The same expanded controller card in dark theme](docs/controller-card-dark.png) |
+
+Top to bottom — every element below is visible in the screenshots above:
 
 - **Header** — device name, model and live status (`Front Lawn` / `2 zones running` /
   `Rain delay active` / `All idle` / `Fault detected` / `Off`), plus an **Auto/Off
   segmented control**. This is the authoritative device-mode control; it calls
-  `select.select_option` on `select.*_device_mode`.
+  `select.select_option` on `select.*_device_mode`. The device icon carries a small
+  **hub-status dot** at its bottom-right corner — green when `binary_sensor.*_connected`
+  is on, red when it is not. It is easy to miss in a static screenshot and easy to rely on
+  once you know it is there: it is the only always-visible piece of hub status, and it
+  renders whether the drawer is open or closed.
 - **Zone rows** — one compact, permanently-collapsed row per zone: shape icon, name,
   `Idle` or `Watering · M:SS left`, and a single Run/Stop button. Tapping the name opens
   the more-info dialog.
-- **Summary chips** — next scheduled run, battery, and an optional weekly-gallons chip.
 - **Programs & settings drawer** — closed by default, opened by the handle row:
+  - **Status · all zones** — four read-only rows carrying the device-level facts: **Hub**
+    (Online/Offline, with the bridge and signal strength when a signal sensor resolves),
+    **Battery**, **Next run** (earliest across every zone, naming that zone) and **This
+    week**. They have no switch and no press state — the right-hand column is a value, not
+    a control. A row is omitted when its data is missing.
   - **Programs · all zones** — every `switch.*_*_program` on the device, merged and listed
     once with its schedule. Programs are device-level, not per zone, so this list is not
     filtered by zone and there is no zone selector.
@@ -119,15 +131,27 @@ expanded:
   - **Run time** — a stepper that writes the manual preset to every zone on the controller
     via `bhyve.set_manual_preset_runtime`.
 
-`show_actions: false` hides the Run/Stop buttons and the drawer, giving a read-only
-overview. The Auto/Off control stays.
+There is no summary chip row above the drawer. Those four stats used to sit between the
+zone rows and the drawer handle, repeating on every controller card on the dashboard; they
+now live in the Status section, one tap away, and the collapsed card runs straight from the
+zone rows to the handle. Hub status is the exception — it is the one fact that explains
+every other stale value on the card, so it stays visible as the dot on the header icon.
 
-`show_programs: false` drops the drawer on its own — the merged program list, the rain
-delay row, the run time stepper, and the show/hide row that opens them — while leaving the
-Run/Stop buttons in place. Use it when the programs live on one dashboard card and you want
-the others to stay compact. The section is not rendered at all, not hidden with CSS, so
-there is nothing left to expand. Setting either option to `false` is enough to remove the
-drawer.
+Neither `show_actions` nor `show_programs` can hide the Status section. Both are about
+controls — one hides Run/Stop, the other the programs list — and read-only device health is
+not a control. With either set to `false` the drawer keeps its toggle, the tap gesture is
+the same, and the section behind it is Status alone; the toggle row then reads **Show
+status** instead of **Show programs & settings**, since there are no settings left to
+offer. The hub dot is independent of both, as it is of the drawer itself.
+
+`show_actions: false` hides the Run/Stop buttons, the programs list, the rain delay row and
+the run time stepper, giving a read-only overview. The Auto/Off control stays, and so does
+Status.
+
+`show_programs: false` drops the same block on its own while leaving the Run/Stop buttons
+in place. Use it when the programs live on one dashboard card and you want the others to
+stay compact. Nothing is hidden with CSS — the omitted rows are not rendered at all, so
+there is nothing left to expand into.
 
 ### The Off state
 
@@ -143,17 +167,19 @@ on the controller at once.
 |---|---|---|---|
 | `title` | string | device name | Header title |
 | `device_id` | string | first B-hyve device | From the device registry |
-| `show_actions` | bool | `true` | Run/Stop buttons and the drawer |
-| `show_programs` | bool | `true` | Set `false` to omit the whole programs & settings drawer, its show/hide row included |
+| `show_actions` | bool | `true` | Run/Stop buttons and the drawer controls. Never the Status section |
+| `show_programs` | bool | `true` | Set `false` to omit the programs list, rain delay and run time. Never the Status section |
 | `run_time` | number | `10` | Starting value for the run-time stepper |
 | `zones` | list | discovered | Explicit list of zone valve entities |
 | `device_mode_entity` | string | discovered | `select.*_device_mode` |
 | `rain_delay_entity` | string | discovered | `switch.*_rain_delay` |
 | `next_watering_entity` | string | discovered | `sensor.*_next_watering` |
 | `battery_entity` | string | discovered | `sensor.*_battery_level` |
+| `hub_entity` | string | discovered | `binary_sensor.*_connected` — backs the hub dot and the Hub row |
+| `signal_entity` | string | discovered | `sensor.*_signal_strength` — appended to the Hub row when present |
 | `fault_entity` | string | discovered | `binary_sensor.*_fault` |
 | `program_entities` | list | discovered | `switch.*_*_program` |
-| `weekly_volume_entity` | string | — | See [Weekly volume](#weekly-volume) |
+| `weekly_volume_entity` | string or list | — | See [Weekly volume](#weekly-volume) |
 | `rain_delay_hours` | number | `24` | Hours passed to `bhyve.enable_rain_delay` |
 
 ### Run time, and what happens when the device says no
@@ -294,8 +320,28 @@ The integration only exposes the **latest** run per zone, so a weekly total has 
 from a Home Assistant statistics helper you create yourself — sum
 `consumption_gallons` over a week — and then point `weekly_volume_entity` at it.
 
-The chip is omitted entirely when the entity is not configured, unavailable, or zero. A
-`0 gal this week` chip is never rendered.
+The zone card renders it as a chip, omitted entirely when the entity is not configured,
+unavailable, or zero. A `0 gal this week` chip is never rendered.
+
+The controller card shows the same figure as the **This week** row in its Status section,
+and accepts either form:
+
+```yaml
+# one device-level helper — the whole controller's total
+weekly_volume_entity: sensor.front_yard_weekly_gallons
+
+# one helper per zone — the card sums them
+weekly_volume_entity:
+  - sensor.front_lawn_weekly_gallons
+  - sensor.garden_beds_weekly_gallons
+```
+
+Given a list, the row sums only the helpers that actually report; unavailable ones are
+skipped rather than counted as zero. If the list covers fewer helpers than the card has
+zones, the sub-line reads `2 of 4 zones` instead of `All zones combined`, so a partial
+total never passes itself off as the whole. A single helper is a whole-controller total by
+definition and is always labelled as such. Like the chip, the row is omitted when the total
+is zero or nothing is configured.
 
 ### Flood sensors
 
@@ -399,6 +445,13 @@ beneath the stepper and keeps the value locally. Support for that service is pat
 **A chip is missing** *(zone card)* — each chip has its own rule; see
 [The chip row](#the-chip-row). Last-run chips need the zone to have run at least once, and
 the weekly chip needs `weekly_volume_entity` set to a non-zero statistics helper.
+
+**A Status row is missing** *(controller card)* — each row is omitted when the entity
+behind it does not resolve. Hub and Battery need `binary_sensor.*_connected` and
+`sensor.*_battery_level` on the device; Next run needs either `sensor.*_next_watering` or a
+zone with a future `next_start_time`; This week needs `weekly_volume_entity`. Neither
+`show_actions: false` nor `show_programs: false` can remove the section — they hide
+controls, not device health.
 
 **Hub shows Offline unexpectedly** *(zone card)* — the chip reads that zone's own
 `binary_sensor.*_connected`. If the zone has no connectivity sensor of its own on a
