@@ -9,7 +9,7 @@ design vocabulary.
 
 | Card | Type | One per | What it is for |
 |---|---|---|---|
-| **Controller card** | `custom:bhyve-controller-card` | B-hyve device | Device overview — status, Auto/Off, a compact row per zone, and the settings all zones share (programs, rain delay, run time). |
+| **Controller card** | `custom:bhyve-controller-card` | B-hyve device | Device overview — status, Auto/Off, a hub-status dot on the header icon, a compact row per zone, and a drawer holding read-only device health plus the settings all zones share (programs, rain delay, run time). |
 | **Zone card** | `custom:bhyve-zone-card` | zone | Full detail for one zone — state, controls, the complete chip row, smart watering and that zone's programs. Also renders B-hyve flood sensors. |
 
 The two are independent. A zone row on the controller card is **not** a collapsed zone
