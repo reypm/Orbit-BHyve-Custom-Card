@@ -1,6 +1,6 @@
 {
   "name": "B-hyve Cards",
-  "description": "Two Lovelace cards for Orbit B-hyve irrigation: a controller card (device overview, zone rows, programs and shared settings) and a zone card (full per-zone detail). Mushroom-styled, zero-config auto-discovery.",
+  "description": "One Lovelace card for Orbit B-hyve irrigation: device overview, a row per zone, read-only device status, programs and shared settings. Mushroom-styled, zero-config auto-discovery. Also renders B-hyve flood sensors.",
   "content_in_root": true,
   "filename": "bhyve-cards.js",
   "homeassistant": "2023.1.0",

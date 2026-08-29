@@ -2,27 +2,25 @@
 
 [![Unit Tests](https://github.com/reypm/Orbit-BHyve-Custom-Card/actions/workflows/test.yml/badge.svg)](https://github.com/reypm/Orbit-BHyve-Custom-Card/actions/workflows/test.yml)
 
-Two Lovelace cards for [Orbit B-hyve](https://bhyve.orbitonline.com/) irrigation systems,
+One Lovelace card for [Orbit B-hyve](https://bhyve.orbitonline.com/) irrigation systems,
 built for the [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant)
 integration and styled with the [Mushroom](https://github.com/piitaya/lovelace-mushroom)
 design vocabulary.
 
-| Card | Type | One per | What it is for |
-|---|---|---|---|
-| **Controller card** | `custom:bhyve-controller-card` | B-hyve device | Device overview — status, Auto/Off, a hub-status dot on the header icon, a compact row per zone, and a drawer holding read-only device health plus the settings all zones share (programs, rain delay, run time). |
-| **Zone card** | `custom:bhyve-zone-card` | zone | Full detail for one zone — state, controls, the complete chip row, smart watering and that zone's programs. Also renders B-hyve flood sensors. |
-
-The two are independent. A zone row on the controller card is **not** a collapsed zone
-card and never expands into one — tapping it opens Home Assistant's standard more-info
-dialog. Place zone cards wherever you want them on the dashboard; you do not need the
-controller card to use them, or vice versa.
-
-> **v3 is a breaking change.** The single `bhyve-sprinkler-card` is gone.
-> See [Migrating from v2](#migrating-from-v2).
+> ### ⚠️ v5.0.0 is a breaking change
+>
+> The v3–v4 pair — `custom:bhyve-controller-card` and `custom:bhyve-zone-card` — is now a
+> single `custom:bhyve-card`. One card per B-hyve device, with every zone as a row inside
+> it instead of a card of its own.
+>
+> **`custom:bhyve-zone-card` is gone and will not render.** If you have zone cards on a
+> dashboard, see [Migrating from v4](#migrating-from-v4) — it is usually a delete, not a
+> rewrite. `custom:bhyve-controller-card` still works: it is kept as an alias of the new
+> card, so a v4 controller-card config renders unchanged.
 
 | Light | Dark | Mobile |
 |---|---|---|
-| ![BHyve controller card beside a running and an idle zone card on a Home Assistant dashboard, light theme](docs/preview.png) | ![The same controller card and zone card layout rendered in dark theme](docs/preview-dark.png) | ![The controller card above a running zone card, stacked in a single column at a 375 pixel mobile viewport](docs/preview-mobile.png) |
+| ![The B-hyve card with its settings section open: device header with a hub-status dot, four zone rows, the read-only Status · all zones rows, rain delay and run time](docs/preview.png) | ![The same card rendered in dark theme](docs/preview-dark.png) | ![The card collapsed at a 375 pixel mobile viewport: header, four zone rows and the two section toggles](docs/preview-mobile.png) |
 
 ---
 
@@ -30,10 +28,10 @@ controller card to use them, or vice versa.
 
 - Home Assistant 2023.1 or newer
 - The [sebr/bhyve-home-assistant](https://github.com/sebr/bhyve-home-assistant) integration
-- [Mushroom](https://github.com/piitaya/lovelace-mushroom) — **optional.** The cards borrow
+- [Mushroom](https://github.com/piitaya/lovelace-mushroom) — **optional.** The card borrows
   Mushroom's visual vocabulary, but every colour falls back to Mushroom's own default value,
-  so they look the same whether or not it is installed. If you do run a Mushroom theme that
-  sets `--mush-rgb-*`, the cards pick those overrides up automatically.
+  so it looks the same whether or not it is installed. If you do run a Mushroom theme that
+  sets `--mush-rgb-*`, the card picks those overrides up automatically.
 
 ---
 
@@ -55,276 +53,186 @@ url: /local/bhyve-cards.js
 type: module
 ```
 
-### Why one file
-
-Both card types ship in a single `bhyve-cards.js`. They share a lot — registry
-discovery, formatting, optimistic state, the service-call wrappers — and the two obvious
-alternatives are each worse:
-
-- **A shared module plus two thin card files** means three Lovelace resources whose load
-  order matters. HACS's `filename` field names one file anyway, so the extra files would
-  need manual registration in the right sequence.
-- **Duplicating the shared code into two self-contained files** removes the ordering
-  problem but guarantees the two copies drift apart.
-
-One file keeps a single source of truth, one resource to register, and no build step. The
-cost is that you load both cards even if you only use one — about 60 KB, once, cached.
-
 ---
 
 ## Quick start
 
-Zero config. Both cards discover everything from the device and entity registries.
+Zero config. The card discovers the device, its zones and every related entity from the
+device and entity registries.
 
 ```yaml
-type: custom:bhyve-controller-card
+type: custom:bhyve-card
 ```
 
+That is the whole configuration for a single-controller setup. With more than one B-hyve
+device, add one card per device and name it:
+
 ```yaml
-type: custom:bhyve-zone-card
-entity: valve.front_lawn
+type: custom:bhyve-card
+device_id: 0a1b2c3d4e5f…
 ```
 
 ---
 
-## Controller card
+## The card
 
-```yaml
-type: custom:bhyve-controller-card
-title: Front Yard          # optional — defaults to the device name
-device_id: abc123…         # optional — defaults to the first B-hyve device found
-show_actions: true         # optional — default true
-show_programs: true        # optional — default true
-```
+Top to bottom — every element below is visible in the screenshots in this section.
 
 | Collapsed | Collapsed · dark |
 |---|---|
-| ![BHyve controller card with the drawer collapsed: device header with a green hub-status dot on its icon, four compact zone rows, and the show programs and settings row — no chip row in between](docs/controller-collapsed.png) | ![The same collapsed controller card rendered in dark theme, the hub dot still green against the dark card](docs/controller-collapsed-dark.png) |
+| ![The B-hyve card at rest: header with a green hub-status dot on the device icon, four zone rows, and the two section toggle rows](docs/card-collapsed.png) | ![The same collapsed card in dark theme, the hub dot still green](docs/card-collapsed-dark.png) |
 
-| Expanded | Expanded · dark |
+### Header
+
+Device name, model and the aggregate state of every zone (`All idle` / `1 zone watering` /
+`Rain delay active` / `Fault detected` / `Off`), plus an **Auto/Off segmented control**.
+This is the authoritative device-mode control; it calls `select.select_option` on
+`select.*_device_mode`.
+
+The device icon carries a small **hub-status dot** at its bottom-right corner — green when
+`binary_sensor.*_connected` is on, red when it is not. It is easy to miss in a static
+screenshot and easy to rely on once you know it is there: an offline hub is the one fact
+that explains every other stale value on the card, so it is the only thing that is always
+visible. **No configuration option can hide it**, and it renders whether the sections
+below are open or closed.
+
+There is deliberately no second dot. The moment there are two, neither reads as a status
+light.
+
+### Zone rows
+
+One compact row per zone: shape icon, name, `Idle` or `Watering · M:SS left` recomputed
+live from `started_watering_station_at`, and a single Run/Stop button carrying the current
+preset duration. Tapping the name opens Home Assistant's standard more-info dialog.
+
+Rows follow the controller's own station numbering, not entity-id order.
+
+### Settings & configuration
+
+The first of two collapsible sections, closed by default. Its sub-line reads
+`Status · rain delay · run time`, so you know what is inside without opening it.
+
+| Open | Open · dark |
 |---|---|
-| ![BHyve controller card with the drawer expanded, showing the read-only Status · all zones section — Hub, Battery, Next run and This week — above the merged programs list, the rain delay row and the run time stepper](docs/controller-card.png) | ![The same expanded controller card in dark theme](docs/controller-card-dark.png) |
+| ![The settings section open, showing the STATUS · ALL ZONES rows — Hub, Battery, Next run, This week — a divider, then the rain delay toggle and the run time stepper](docs/card-settings.png) | ![The same section in dark theme](docs/card-settings-dark.png) |
 
-Top to bottom — every element below is visible in the screenshots above:
+**STATUS · ALL ZONES** comes first: four **read-only** rows, one per device-level fact.
+Nothing here is per zone, and nothing here is a control — the right-hand column is a value,
+never a switch.
 
-- **Header** — device name, model and live status (`Front Lawn` / `2 zones running` /
-  `Rain delay active` / `All idle` / `Fault detected` / `Off`), plus an **Auto/Off
-  segmented control**. This is the authoritative device-mode control; it calls
-  `select.select_option` on `select.*_device_mode`. The device icon carries a small
-  **hub-status dot** at its bottom-right corner — green when `binary_sensor.*_connected`
-  is on, red when it is not. It is easy to miss in a static screenshot and easy to rely on
-  once you know it is there: it is the only always-visible piece of hub status, and it
-  renders whether the drawer is open or closed.
-- **Zone rows** — one compact, permanently-collapsed row per zone: shape icon, name,
-  `Idle` or `Watering · M:SS left`, and a single Run/Stop button. Tapping the name opens
-  the more-info dialog.
-- **Programs & settings drawer** — closed by default, opened by the handle row:
-  - **Status · all zones** — four read-only rows carrying the device-level facts: **Hub**
-    (Online/Offline, with the bridge and signal strength when a signal sensor resolves),
-    **Battery**, **Next run** (earliest across every zone, naming that zone) and **This
-    week**. They have no switch and no press state — the right-hand column is a value, not
-    a control. A row is omitted when its data is missing.
-  - **Programs · all zones** — every `switch.*_*_program` on the device, merged and listed
-    once with its schedule. Programs are device-level, not per zone, so this list is not
-    filtered by zone and there is no zone selector.
-  - **Rain delay** — toggle, with hours remaining and cause while active.
-  - **Run time** — a stepper that writes the manual preset to every zone on the controller
-    via `bhyve.set_manual_preset_runtime`.
+| Row | Shows |
+|---|---|
+| **Hub** | `Online` / `Offline`. Sub-line names the bridge and its signal strength when a signal sensor resolves; when offline it reads `Not reachable · last seen HH:MM` instead |
+| **Battery** | The controller's battery percentage, amber below 20% |
+| **Next run** | The earliest scheduled run across every zone, naming the zone that owns it |
+| **This week** | Total water volume, all zones combined — see [Weekly volume](#weekly-volume) |
 
-There is no summary chip row above the drawer. Those four stats used to sit between the
-zone rows and the drawer handle, repeating on every controller card on the dashboard; they
-now live in the Status section, one tap away, and the collapsed card runs straight from the
-zone rows to the handle. Hub status is the exception — it is the one fact that explains
-every other stale value on the card, so it stays visible as the dot on the header icon.
+A row is omitted individually when the entity behind it does not resolve, so nothing is
+faked: the Hub sub-line drops the signal reading when no signal sensor exists, and the
+Battery sub-line claims no charging state, which the integration does not expose.
 
-Neither `show_actions` nor `show_programs` can hide the Status section. Both are about
-controls — one hides Run/Stop, the other the programs list — and read-only device health is
-not a control. With either set to `false` the drawer keeps its toggle, the tap gesture is
-the same, and the section behind it is Status alone; the toggle row then reads **Show
-status** instead of **Show programs & settings**, since there are no settings left to
-offer. The hub dot is independent of both, as it is of the drawer itself.
+Below a divider sit the two things you can act on:
 
-`show_actions: false` hides the Run/Stop buttons, the programs list, the rain delay row and
-the run time stepper, giving a read-only overview. The Auto/Off control stays, and so does
-Status.
+- **Rain delay** — a toggle, with hours remaining and cause while active.
+- **Run time** — a stepper that writes the manual preset to every zone on the controller
+  via `bhyve.set_manual_preset_runtime`.
 
-`show_programs: false` drops the same block on its own while leaving the Run/Stop buttons
-in place. Use it when the programs live on one dashboard card and you want the others to
-stay compact. Nothing is hidden with CSS — the omitted rows are not rendered at all, so
-there is nothing left to expand into.
+### Programs · all zones
+
+The second section, also closed by default. Its sub-line counts both halves —
+`2 enabled · 4 disabled`.
+
+| Open | Open · dark |
+|---|---|
+| ![The programs section open: the merged program list with two enabled programs, then a "4 disabled programs" subsection rule and the disabled ones below it](docs/card-programs.png) | ![The same section in dark theme](docs/card-programs-dark.png) |
+
+Every `switch.*_*_program` on the device, merged and listed once with its schedule.
+Programs are **device-level, not per zone**, so this list is not filtered by zone and there
+is no zone selector.
+
+Enabled programs list first. Disabled ones follow below an `N disabled programs` rule, as a
+subsection rather than a second fold — this is the place you come to configure programs, so
+hiding half of them behind another tap inside a section you already opened would be one
+fold too many. Their switches are live either way; only the name steps back in colour.
+
+A weather-adjusted (smart) program reads `Weather adjusted · soil 61%` rather than a fixed
+schedule, because it picks its own start times and durations.
+
+Programs here are **independent switches** — enabling one does not disable another.
+
+### The two sections are independent
+
+Each has its own chevron and its own open state; either, both or neither can be open. Both
+start closed, so the card rests at header + zone rows + two toggle rows.
 
 ### The Off state
 
 Switching the device to **Off** swaps the status for an orange banner, since no program
-will run until it goes back to Auto. This is a device-level state: it affects every zone
-on the controller at once.
+will run until it goes back to Auto. This is device-level: it affects every zone at once.
 
-![BHyve controller card and zone card while the device mode is Off, showing the orange "Controller is off — no program will run" banner beneath the header](docs/zone-card-off.png)
+![The card with the device mode set to Off, showing the orange "Controller is off — no program will run" banner beneath the header and every zone row reading Off](docs/card-off.png)
 
-### Controller card fields
+### An offline hub
+
+The dot turns red and the Hub row says when the device was last reachable. Every other
+value on the card is the last one received.
+
+![The card with an offline hub: a red dot on the header icon and a red Hub row reading "Not reachable · last seen 09:40 PM" with the value Offline](docs/card-hub-offline.png)
+
+---
+
+## Configuration
+
+### Card fields
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `title` | string | device name | Header title |
 | `device_id` | string | first B-hyve device | From the device registry |
-| `show_actions` | bool | `true` | Run/Stop buttons and the drawer controls. Never the Status section |
-| `show_programs` | bool | `true` | Set `false` to omit the programs list, rain delay and run time. Never the Status section |
+| `zones` | list | discovered | Entity ids, or `{ entity, name }` — see below |
+| `entity` | string | — | Point at a flood sensor to render the [flood layout](#flood-sensors) |
 | `run_time` | number | `10` | Starting value for the run-time stepper |
-| `zones` | list | discovered | Explicit list of zone valve entities |
-| `device_mode_entity` | string | discovered | `select.*_device_mode` |
-| `rain_delay_entity` | string | discovered | `switch.*_rain_delay` |
-| `next_watering_entity` | string | discovered | `sensor.*_next_watering` |
-| `battery_entity` | string | discovered | `sensor.*_battery_level` |
-| `hub_entity` | string | discovered | `binary_sensor.*_connected` — backs the hub dot and the Hub row |
-| `signal_entity` | string | discovered | `sensor.*_signal_strength` — appended to the Hub row when present |
-| `fault_entity` | string | discovered | `binary_sensor.*_fault` |
-| `program_entities` | list | discovered | `switch.*_*_program` |
-| `weekly_volume_entity` | string or list | — | See [Weekly volume](#weekly-volume) |
 | `rain_delay_hours` | number | `24` | Hours passed to `bhyve.enable_rain_delay` |
+| `show_actions` | bool | `true` | Run/Stop, rain delay, run time and the programs section. Never the Status rows |
+| `show_programs` | bool | `true` | The programs section alone. Never the Status rows |
 
-### Run time, and what happens when the device says no
+### Entity overrides
 
-The stepper calls `bhyve.set_manual_preset_runtime` on every zone valve, so the value
-survives reloads and matches the B-hyve app. Support for that service is patchy across
-devices. If the call is rejected — or the service is not available at all — the card keeps
-the value as a **session-only default for itself**, does not persist it across reloads,
-and shows an inline note saying the device refused the preset.
+Every one of these is discovered. Set one only where discovery guesses wrong.
 
-This value is never used by the zone card's Run button, which always passes its own
-explicit `minutes`. Watering works either way.
-
----
-
-## Zone card
-
-```yaml
-type: custom:bhyve-zone-card
-entity: valve.front_lawn   # required
-name: Front Lawn           # optional
-run_time: 10               # optional — minutes for the Run button
-```
-
-Everything else — hub, battery, history, programs, smart watering, rain delay, fault —
-is discovered from the zone's own device.
-
-### The four states
-
-| State | Looks like |
-|---|---|
-| **Idle** | Grey shape icon, `Idle · station N`, a Run button showing the preset minutes, the chip row, and smart watering + this zone's programs rendered inline. |
-| **Running** | Accent shape icon, `Watering · M:SS left` recomputed live from `started_watering_station_at`, a Stop button, a thin progress bar, the same chip row, and quick-action buttons for rain delay and smart watering (filled when on, hairline outline when off). |
-| **Fault** | Red card border and icon, `Fault · will not run`, an inline warning banner with the human-readable fault from `station_faults`, and a disabled **Run blocked** button. The chip row is still shown. |
-| **Unavailable** | `?` icon, `Unavailable · entity not reporting`, only the hub and `Last seen …` chips, and **no action button at all**. |
-
-All four, in the same order as the table above — each panel is labelled with its state:
-
-![The four BHyve zone card states side by side. Idle: grey icon, "Idle · station 2" and a blue Run 10 min button. Running: blue icon, "Watering · 6:06 left", a red Stop button and a progress bar. Fault: red border and icon, "Fault · will not run", a red warning banner reading "Station 3 reports short circuit" and a greyed-out Run blocked button. Unavailable: question mark icon, "Unavailable · entity not reporting" and only two chips](docs/zone-card-states.png)
-
-> **There is a fifth thing to look for.** When the controller's device mode is **Off**,
-> no zone will run even though each one still reports `Idle`. That state lives on the
-> controller card, not the zone card — see [The Off state](#the-off-state) and
-> [`docs/zone-card-off.png`](docs/zone-card-off.png).
-
-### Programs
-
-B-hyve hardware runs **one program at a time**, so the card treats the program switches as a
-single-selection group rather than a list of independent toggles. The section is three rows
-at most:
-
-1. **Smart watering** — always first, always visible. It adjusts whatever schedule is
-   running rather than competing with the lettered programs, so it sits outside the group
-   entirely and is never counted as a disabled program.
-2. **The one enabled program**, with an accent row fill. If no program is enabled you get a
-   neutral row instead — *"No program enabled · This zone only waters when you run it
-   manually"* — which is a legitimate setup, not a fault, and is coloured accordingly.
-3. **A fold row for everything else**, reading *"7 disabled programs"* collapsed and
-   *"Hide 7 disabled programs"* expanded (singular for one). It is omitted when there is
-   nothing to fold, and starts collapsed — the program you actually care about is already
-   on the card, so collapsing costs no information.
-
-![Zone card program section: collapsed by default showing Smart watering, the one enabled program with an accent fill, and a "4 disabled programs" fold row; expanded showing all four disabled programs; and the neutral "No program enabled" state](docs/zone-programs.png)
-
-**Enabling a program disables the one that was on.** Tapping an off program issues
-`switch.turn_on` for it and `switch.turn_off` for the outgoing one in the same handler, and
-both rows move together. Tapping the enabled program switches it off and leaves the zone
-with no program — that is a valid end state, not an error, and nothing is auto-enabled in
-its place.
-
-![Before and after tapping a different program: Program A moves from the enabled slot into the disabled list reading off, and Program C takes its place with the accent fill and its switch on](docs/zone-selection.png)
-
-If the B-hyve app has left two programs on, the card shows the first as enabled and leaves
-the other in the fold still reading on, rather than silently correcting a change you made
-elsewhere.
-
-#### Hiding the section vs. the fold
-
-These are two different things, on two different axes:
-
-- **`show_smart_watering_and_programs: false`** hides the section *entirely* — smart
-  watering, the enabled program, the neutral row and the fold all go, and nothing is
-  rendered in their place.
-- **The fold within a shown section is not configurable.** Whenever the section is
-  displayed it always uses the behaviour above: disabled programs collapse by default,
-  and there is no way to force the old always-show-everything layout back.
-
-```yaml
-type: custom:bhyve-zone-card
-entity: valve.front_lawn
-show_smart_watering_and_programs: false
-```
-
-> **Upgrading from v3.1/v3.2?** The zone card's old `show_programs` option did roughly what
-> `show_smart_watering_and_programs` does now, but it is **gone**, not renamed — a leftover
-> `show_programs: false` on a zone card is ignored. It was given a new name deliberately, so
-> an old config can't silently keep working with subtly different behaviour. The controller
-> card's `show_programs` is a separate option and is unaffected.
-
-### The chip row
-
-Fixed order, not configurable. Each chip has its own visibility rule.
-
-| # | Chip | Shown when |
+| Field | Type | Discovers |
 |---|---|---|
-| 1 | **Hub status** | Always, from this zone's own `binary_sensor.*_connected`. Green online, red offline — never hidden, because an offline hub explains every other stale chip. |
-| 2 | **Battery %** | The battery sensor exists. Amber with a battery-alert icon at ≤ 20%; neutral otherwise. Absent on mains-powered controllers. |
-| 3 | **Last-run duration** | The zone history sensor exists *and* the zone has run at least once. |
-| 4 | **Last-run volume** | Same history entry as #3 — the two appear and disappear together. |
-| 5 | **Weekly volume** | Optional, and only when the value is a real number greater than zero. |
-| 6 | **Next run / rain delay** | One slot. Shows the next scheduled time normally; while a rain delay is active, the delay chip replaces it, tinted with the accent. |
+| `device_mode_entity` | string | `select.*_device_mode` |
+| `hub_entity` | string | `binary_sensor.*_connected` — backs the hub dot and the Hub row |
+| `signal_entity` | string | `sensor.*_signal_strength` — appended to the Hub row when present |
+| `battery_entity` | string | `sensor.*_battery_level` |
+| `next_watering_entity` | string | `sensor.*_next_watering` |
+| `rain_delay_entity` | string | `switch.*_rain_delay` |
+| `fault_entity` | string | `binary_sensor.*_fault` |
+| `program_entities` | list | `switch.*_*_program` |
+| `weekly_volume_entity` | string or list | Nothing — see [Weekly volume](#weekly-volume) |
+| `temperature_entity` | string | `sensor.*_temperature` (flood sensors) |
 
-Hub connectivity is resolved **per zone**, not shared from the controller. That was a bug
-in v2 and is fixed here.
+### Zones
 
-### Zone card fields
+Left unset, the card lists every `valve.*` on the device in station order. Set `zones` to
+restrict or reorder them. Both forms work, and they mix:
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `entity` | string | **required** | The zone valve, or a flood-sensor `binary_sensor` |
-| `name` | string | zone name | Display name |
-| `run_time` | number | `10` | Minutes for the Run button |
-| `show_smart_watering_and_programs` | bool | `true` | Set `false` to omit the whole smart-watering and programs section. See the note below — this is not the same as the fold |
-| `hub_entity` | string | discovered | `binary_sensor.*_connected` |
-| `battery_entity` | string | discovered | `sensor.*_battery_level` |
-| `history_entity` | string | discovered | `sensor.*_zone_history` |
-| `fault_entity` | string | discovered | `binary_sensor.*_fault` |
-| `rain_delay_entity` | string | discovered | `switch.*_rain_delay` |
-| `smart_watering_entity` | string | discovered | `switch.*_smart_watering` |
-| `program_entities` | list | discovered | Matched to the zone by `run_times[].station` |
-| `next_watering_entity` | string | discovered | `sensor.*_next_watering` |
-| `weekly_volume_entity` | string | — | See below |
-| `rain_delay_hours` | number | `24` | Hours passed to `bhyve.enable_rain_delay` |
+```yaml
+zones:
+  - valve.front_lawn                 # entity id
+  - entity: valve.garden_beds        # with a display-name override
+    name: Beds
+```
+
+The object form exists because renaming a zone was the one per-zone setting the old zone
+card had that v5b still renders. Everything else about a zone comes from its entity.
 
 ### Weekly volume
 
 The integration only exposes the **latest** run per zone, so a weekly total has to come
-from a Home Assistant statistics helper you create yourself — sum
-`consumption_gallons` over a week — and then point `weekly_volume_entity` at it.
-
-The zone card renders it as a chip, omitted entirely when the entity is not configured,
-unavailable, or zero. A `0 gal this week` chip is never rendered.
-
-The controller card shows the same figure as the **This week** row in its Status section,
-and accepts either form:
+from a Home Assistant statistics helper you create yourself — sum `consumption_gallons`
+over a week — and then point `weekly_volume_entity` at it. The card accepts either form:
 
 ```yaml
 # one device-level helper — the whole controller's total
@@ -340,135 +248,137 @@ Given a list, the row sums only the helpers that actually report; unavailable on
 skipped rather than counted as zero. If the list covers fewer helpers than the card has
 zones, the sub-line reads `2 of 4 zones` instead of `All zones combined`, so a partial
 total never passes itself off as the whole. A single helper is a whole-controller total by
-definition and is always labelled as such. Like the chip, the row is omitted when the total
-is zero or nothing is configured.
+definition and is always labelled as such. The row is omitted when the total is zero or
+nothing is configured.
+
+### Run time, and what happens when the device says no
+
+The stepper calls `bhyve.set_manual_preset_runtime` on every zone valve, so the value
+survives reloads and matches the B-hyve app. Support for that service is patchy across
+devices. If the call is rejected — or the service is not available at all — the card keeps
+the value as a **session-only default for itself**, does not persist it across reloads, and
+shows an inline note saying the device refused the preset. Watering works either way: the
+Run button always passes its own explicit `minutes`.
 
 ### Flood sensors
 
-Point a zone card at a B-hyve flood sensor's `binary_sensor` and it renders the flood
-layout instead: a home icon (blue when dry, red when wet), `Dry` or
-`Water detected · HH:MM`, and chips for temperature, signal strength and battery.
+A B-hyve flood sensor is its own device with none of a controller's parts, so pointing the
+card at one renders the flood layout instead: a home icon (blue when dry, red when wet),
+`Dry` or `Water detected · HH:MM`, and chips for temperature, signal strength and battery.
 
-![BHyve flood sensor card in two states side by side. Dry: blue home icon and the label "Dry". Water detected: red accent border and icon with "Water detected" followed by the time it triggered. Both show temperature, signal strength and battery chips](docs/flood-sensor.png)
+```yaml
+type: custom:bhyve-card
+entity: binary_sensor.basement_flood_sensor
+```
+
+![B-hyve flood sensor card in two states side by side. Dry: blue home icon and the label "Dry". Water detected: red accent border and icon with "Water detected" followed by the time it triggered. Both show temperature, signal strength and battery chips](docs/flood-sensor.png)
+
+### Visual editor
+
+The card has one. It offers title, device picker (filtered to the B-hyve integration), run
+time and the two `show_*` toggles. The entity overrides and `zones` are YAML-only for now —
+the editor notes this inline.
 
 ---
 
-## Configuration editors
+## Migrating from v4
 
-Both cards have visual editors. The controller editor offers title, device picker
-(filtered to the B-hyve integration) and the actions toggle; the zone editor offers the
-entity picker, name and run time. The controller card additionally exposes **Show programs
-& settings** (`show_programs`); the zone card has no equivalent, since its program section
-manages its own fold. The entity overrides in the tables above are YAML-only for now — the
-editors note this inline.
+v4 shipped two card types. v5 has one.
 
----
-
-## Migrating from v2
-
-v2 was a single `bhyve-irrigation-card` / `bhyve-sprinkler-card` with a manually
-configured zone grid inside one card. v3 replaces it with two card types placed as
-separate dashboard cards, and discovers zones from the registry instead of asking you to
-list them.
-
-**Before (v2):**
+**Controller cards keep working.** `custom:bhyve-controller-card` is registered as an alias
+of `custom:bhyve-card` with the same config, so nothing breaks on upgrade. Switch the type
+when convenient:
 
 ```yaml
-type: custom:bhyve-sprinkler-card
-title: BHyve Sprinkler
-columns: 2
-zones:
-  - entity: switch.front_lawn
-    name: Front Lawn
-    run_time: 10
-    battery_entity: sensor.front_lawn_battery_level
-  - entity: switch.garden_beds
-    name: Garden Beds
-    run_time: 10
+# v4                                  # v5
+type: custom:bhyve-controller-card     type: custom:bhyve-card
+show_actions: true                     show_actions: true
+show_programs: true                    show_programs: true
 ```
 
-**After (v3):**
+**Zone cards must go.** `custom:bhyve-zone-card` is not registered any more and will render
+as a missing custom element. Delete them: everything a zone card showed is either on the
+merged card already or was per-zone duplication of a device-level fact, which is what v5
+exists to remove.
+
+**Before (v4):**
 
 ```yaml
-type: custom:bhyve-controller-card
-
-# then one of these per zone, wherever you want them
-type: custom:bhyve-zone-card
-entity: valve.front_lawn
-
-type: custom:bhyve-zone-card
-entity: valve.garden_beds
+- type: custom:bhyve-controller-card
+- type: custom:bhyve-zone-card
+  entity: valve.front_lawn
+- type: custom:bhyve-zone-card
+  entity: valve.garden_beds
 ```
 
-Notes on the move:
+**After (v5):**
 
-- **Zone entities are `valve.*` in v3.** v2 also accepted `switch.*`; point the new cards
-  at the valve entities the integration creates.
-- **Drop the per-zone entity lists.** `battery_entity`, `hub_entity`, `program_entities`
-  and friends are discovered. Keep them only where discovery guesses wrong.
-- **`columns` is gone.** Use a `grid` card if you want zone cards side by side.
-- **`schedule_days` / `schedule_time` are gone.** Next run now comes from the zone's
-  `next_start_time` and the device's `sensor.*_next_watering`, so there is no manual
-  schedule fallback to configure.
-- **The v2 card is not shipped any more.** If you want the old single-card layout, pin
-  the [`v2.0.0`](https://github.com/reypm/Orbit-BHyve-Custom-Card/releases/tag/v2.0.0)
-  git tag and keep using `bhyve-sprinkler-card.js` from there.
+```yaml
+- type: custom:bhyve-card
+```
+
+What happened to each zone-card option:
+
+| v4 zone card | v5 |
+|---|---|
+| `entity` | Gone. Zones are rows on the one card; use `zones` to restrict which ones |
+| `name` | `zones: [{ entity: …, name: … }]` |
+| `run_time` | `run_time` on the card, applied to every zone |
+| `show_actions` | `show_actions` on the card |
+| `show_smart_watering_and_programs` | Gone. The card's programs section is device-level; `show_programs` hides it |
+| `hub_entity`, `battery_entity`, `fault_entity`, `rain_delay_entity`, `next_watering_entity`, `program_entities`, `weekly_volume_entity`, `signal_entity`, `temperature_entity`, `rain_delay_hours` | Same names, on the one card |
+| `history_entity`, `smart_watering_entity` | Gone. Nothing on the merged card renders per-zone run history or per-zone smart watering |
+
+A flood-sensor zone card becomes a `bhyve-card` with the same `entity` — that layout moved
+across unchanged.
+
+Migrating from **v2**? Its single `bhyve-sprinkler-card` was removed in v3; pin the
+[`v2.0.0`](https://github.com/reypm/Orbit-BHyve-Custom-Card/releases/tag/v2.0.0) tag if you
+still need it.
 
 ---
 
 ## Troubleshooting
 
-**Cards not appearing** — hard-refresh (Ctrl/Cmd+Shift+R) and confirm `bhyve-cards.js` is
+**Card not appearing** — hard-refresh (Ctrl/Cmd+Shift+R) and confirm `bhyve-cards.js` is
 registered under Settings → Dashboards → Resources.
 
-**"No B-hyve devices found"** — the controller card could not find a B-hyve device in the
-registry. Confirm the integration is loaded, then set `device_id` explicitly. Note that
-discovery reads the registry once per page load; reload after adding devices.
+**"Custom element doesn't exist: bhyve-zone-card"** — expected on v5. Delete the zone card;
+see [Migrating from v4](#migrating-from-v4).
+
+**"No B-hyve devices found"** — the card could not find a B-hyve device in the registry.
+Confirm the integration is loaded, then set `device_id` explicitly. Discovery reads the
+registry once per page load; reload after adding devices.
 
 <img src="docs/empty-state.png" width="380"
-     alt="The BHyve card empty state: a large grey sprinkler icon above the heading 'No B-hyve devices found' and the subtext 'Add the Orbit B-hyve integration, or check that this card's entities still exist.'">
+     alt="The B-hyve card empty state: a large grey sprinkler icon above the heading 'No B-hyve devices found' and the subtext 'Add the Orbit B-hyve integration, or check that this card's entities still exist.'">
 
-**Zone stays Idle after tapping Run** *(zone card, controller card)* — the cards use
-optimistic state. If it snaps back, check the HA log for `bhyve.start_watering` errors and
-confirm the entity is the zone valve.
+**A zone stays Idle after tapping Run** — the card uses optimistic state. If it snaps back,
+check the HA log for `bhyve.start_watering` errors and confirm the entity is the zone valve.
 
-**The run-time stepper doesn't change the zone cards** *(controller card)* — expected. The
-integration reads `manual_preset_runtime` once when it builds the valve entity and never
-refreshes it, so a successful `bhyve.set_manual_preset_runtime` is not reflected in the
-attribute until the integration reloads. Tracked upstream:
+**A Status row is missing** — each row is omitted when the entity behind it does not
+resolve. Hub and Battery need `binary_sensor.*_connected` and `sensor.*_battery_level` on
+the device; Next run needs either `sensor.*_next_watering` or a zone with a future
+`next_start_time`; This week needs `weekly_volume_entity`. Neither `show_actions: false`
+nor `show_programs: false` can remove the section — they hide controls, not device health.
+
+**Hub shows Offline unexpectedly** — the Hub row reads the device's own
+`binary_sensor.*_connected`. Set `hub_entity` if discovery picked the wrong one.
+
+**Programs missing or wrong** — the section lists every `switch.*_*_program` on the device,
+merged. If one is missing, set `program_entities` explicitly.
+
+**The run-time stepper doesn't stick** — the integration reads `manual_preset_runtime` once
+when it builds the valve entity and never refreshes it, so a successful
+`bhyve.set_manual_preset_runtime` is not reflected in the attribute until the integration
+reloads. Tracked upstream:
 [sebr/bhyve-home-assistant#478](https://github.com/sebr/bhyve-home-assistant/issues/478).
-The stepper's own value updates immediately and is used by the controller's rows; zone
-cards pick it up after a reload. If the device rejects the call outright the card says so
-beneath the stepper and keeps the value locally. Support for that service is patchy — set
-`run_time` per zone card if your device does not take it.
+If the device rejects the call outright, the card says so beneath the stepper and keeps the
+value locally for this session.
 
-**A chip is missing** *(zone card)* — each chip has its own rule; see
-[The chip row](#the-chip-row). Last-run chips need the zone to have run at least once, and
-the weekly chip needs `weekly_volume_entity` set to a non-zero statistics helper.
-
-**A Status row is missing** *(controller card)* — each row is omitted when the entity
-behind it does not resolve. Hub and Battery need `binary_sensor.*_connected` and
-`sensor.*_battery_level` on the device; Next run needs either `sensor.*_next_watering` or a
-zone with a future `next_start_time`; This week needs `weekly_volume_entity`. Neither
-`show_actions: false` nor `show_programs: false` can remove the section — they hide
-controls, not device health.
-
-**Hub shows Offline unexpectedly** *(zone card)* — the chip reads that zone's own
-`binary_sensor.*_connected`. If the zone has no connectivity sensor of its own on a
-multi-zone device, the chip is omitted rather than borrowing a sibling zone's — set
-`hub_entity` to point at the right one.
-
-**Programs missing or wrong** — the zone card lists only programs whose
-`run_times[].station` matches that zone's station; the controller card's drawer lists all
-of them, merged. If a program is missing from both, set `program_entities` explicitly.
-
-**Run time stepper snaps back or shows a note** *(controller card)* — the device rejected
-`bhyve.set_manual_preset_runtime`. The value is kept for this card until you reload. Zone
-card Run buttons are unaffected.
-
-**Colours don't match my Mushroom theme** — the cards read `--mush-rgb-*` from the document,
+**Colours don't match my Mushroom theme** — the card reads `--mush-rgb-*` from the document,
 which only has a value if your theme sets one. Mushroom does not set these itself; it only
-reads them. Without an override the cards use Mushroom's own default palette, which is the
+reads them. Without an override the card uses Mushroom's own default palette, which is the
 intended look.
 
 ---
@@ -480,9 +390,9 @@ node --check bhyve-cards.js
 node validate.test.js
 ```
 
-`tools/harness.html` renders both cards in a browser against a mocked Home Assistant —
-real HA theme variables, real MDI icon paths, and stand-ins for `ha-card` / `ha-icon`.
-Open it directly (`file://…/tools/harness.html?mush=design`) or screenshot it headless:
+`tools/harness.html` renders the card in a browser against a mocked Home Assistant — real
+HA theme variables, real MDI icon paths, and stand-ins for `ha-card` / `ha-icon`. Open it
+directly (`file://…/tools/harness.html?mush=design`) or screenshot it headless:
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -490,16 +400,27 @@ Open it directly (`file://…/tools/harness.html?mush=design`) or screenshot it 
   --screenshot=gallery.png "file://$PWD/tools/harness.html?mush=design"
 ```
 
-Query parameters: `state=<substring>` renders one state, `w=<px>` sets the card width
-(for checking text overflow), `mush=design|teal|none` controls the `--mush-rgb-*`
-override, and `preview=1` produces the README image.
+Query parameters: `state=<substring>` renders one state, `w=<px>` sets the card width (for
+checking text overflow), `mush=design|teal|none` controls the `--mush-rgb-*` override, and
+`compose=<recipe>` renders one of the README images. In compose mode the page title
+becomes `H<height>` once laid out, so a capture script can size the window to the content.
+
+**Every image in `docs/` is a headless render of the shipped `bhyve-cards.js` through that
+harness — never an export from the design canvas.** The README documents what ships.
 
 Read [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) before changing anything visual.
 
 `validate.test.js` is headless — it stubs the browser globals it needs and evaluates the
-card file, then renders both cards against a fake device/entity registry and dispatches
-real clicks at the rendered handles. Run it before opening a PR, and add assertions for
-any logic you change.
+card file, then renders the card against a fake device/entity registry and dispatches real
+clicks at the rendered handles. Run it before opening a PR, and add assertions for any
+logic you change.
+
+### Why one file
+
+The card, its editor and all shared logic ship in a single `bhyve-cards.js`: one Lovelace
+resource to register, no load-order problem, no build step. The filename is plural for
+historical reasons — it shipped two card types from v3 to v4 — and is kept so existing
+HACS installs and resource registrations keep working.
 
 ---
 

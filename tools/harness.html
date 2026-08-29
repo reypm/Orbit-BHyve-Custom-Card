@@ -133,8 +133,8 @@ function baseStates(){return{
    start_times:['06:00'],run_times:[{station:1,run_time:10},{station:2,run_time:8}]}),
  'switch.bhyve_xr_b_program':st('off',{friendly_name:'Program B',frequency:{interval:4},
    start_times:['04:15'],run_times:[{station:2,run_time:25}]}),
- 'switch.bhyve_xr_e_program':st('off',{friendly_name:'Program E · Smart',is_smart_program:true,
-   run_times:[{station:1,run_time:12}]}),
+ 'switch.bhyve_xr_e_program':st('on',{friendly_name:'Program E · Smart',is_smart_program:true,
+   soil_moisture_level:61,run_times:[{station:1,run_time:12}]}),
  'switch.bhyve_xr_c_program':st('off',{friendly_name:'Program C · Overseed',
    frequency:{days:[0,6]},start_times:['05:30'],run_times:[{station:1,run_time:15}]}),
  'switch.bhyve_xr_d_program':st('off',{friendly_name:'Program D · Winter',
@@ -168,29 +168,26 @@ function makeHass(mutate){
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────────
-const CTRL_CFG_SPEC={weekly_volume_entity:['sensor.week_front_lawn',
+// One weekly-volume helper per zone, so the This week row shows a real sum.
+const CARD_CFG={weekly_volume_entity:['sensor.week_front_lawn',
   'sensor.week_garden_beds','sensor.week_side_strip','sensor.week_back_lawn']};
+const openSettings = c=>{c._open.settings=true;c._render();};
+const openPrograms = c=>{c._open.programs=true;c._render();};
 const SPECS=[
- ['Controller · drawer collapsed','bhyve-controller-card',{},null,null],
- ['Controller · drawer expanded','bhyve-controller-card',CTRL_CFG_SPEC,null,c=>{c._expanded=true;c._render();}],
- ['Controller · hub offline','bhyve-controller-card',CTRL_CFG_SPEC,
-   s=>{s['binary_sensor.front_lawn_connected']=st('off');},c=>{c._expanded=true;c._render();}],
- ['Controller · device off','bhyve-controller-card',{},
+ ['Card · both sections collapsed','bhyve-card',CARD_CFG,null,null],
+ ['Card · settings & configuration open','bhyve-card',CARD_CFG,null,openSettings],
+ ['Card · programs · all zones open','bhyve-card',CARD_CFG,null,openPrograms],
+ ['Card · hub offline','bhyve-card',CARD_CFG,
+   s=>{s['binary_sensor.front_lawn_connected']=st('off');},openSettings],
+ ['Card · device off','bhyve-card',CARD_CFG,
    s=>{s['select.bhyve_xr_device_mode']=st('off',{options:['auto','off']});
        s['valve.front_lawn']=st('closed',{station:1,zone_name:'Front Lawn',next_start_time:future});},null],
- ['Controller · fault detected','bhyve-controller-card',{},
+ ['Card · fault detected','bhyve-card',CARD_CFG,
    s=>{s['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});},null],
- ['Zone · idle','bhyve-zone-card',{entity:'valve.garden_beds'},null,null],
- ['Zone · running','bhyve-zone-card',{entity:'valve.front_lawn'},null,null],
- ['Zone · fault','bhyve-zone-card',{entity:'valve.side_strip'},
-   s=>{s['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});},null],
- ['Zone · unavailable','bhyve-zone-card',{entity:'valve.back_lawn'},null,null],
- ['Zone · rain delay active','bhyve-zone-card',{entity:'valve.front_lawn'},
-   s=>{s['switch.bhyve_xr_rain_delay']=st('on',{delay:48,cause:'wind'});},null],
- ['Flood · dry','bhyve-zone-card',{entity:'binary_sensor.basement_flood_sensor'},null,null],
- ['Flood · water detected','bhyve-zone-card',{entity:'binary_sensor.basement_flood_sensor'},
+ ['Flood · dry','bhyve-card',{entity:'binary_sensor.basement_flood_sensor'},null,null],
+ ['Flood · water detected','bhyve-card',{entity:'binary_sensor.basement_flood_sensor'},
    s=>{s['binary_sensor.basement_flood_sensor']=st('on',{device_class:'moisture'});},null],
- ['Empty · nothing found','bhyve-controller-card',{device_id:'no-such-device'},null,null],
+ ['Empty · nothing found','bhyve-card',{device_id:'no-such-device'},null,null],
 ];
 
 const Q=new URLSearchParams(location.search);
@@ -220,69 +217,30 @@ const offMode = s2 => {
   s2['select.bhyve_xr_device_mode']=st('off',{options:['auto','off']});
   s2['valve.front_lawn']=st('closed',{station:1,zone_name:'Front Lawn',next_start_time:future});
 };
-const faultOn = s2 => {
-  s2['binary_sensor.bhyve_xr_fault']=st('on',{station_faults:[{station:3,fault:'short_circuit'}]});
-};
 const wet = s2 => {
   s2['binary_sensor.basement_flood_sensor']=st('on',{device_class:'moisture'});
 };
-const expand = c => { c._expanded=true; c._render(); };
+const expandSettings = c => { c._open.settings=true; c._render(); };
+const expandPrograms = c => { c._open.programs=true; c._render(); };
+const hubOff = s2 => { s2['binary_sensor.front_lawn_connected']=st('off'); };
 
-const CTRL='bhyve-controller-card', ZN='bhyve-zone-card';
-// One helper per zone, so the drawer's This week row shows a real summed total.
-const CTRL_CFG={weekly_volume_entity:['sensor.week_front_lawn','sensor.week_garden_beds',
-  'sensor.week_side_strip','sensor.week_back_lawn']};
+const C='bhyve-card';
 const RECIPES = {
-  preview: {theme:'light', cols:[
-    [{tag:CTRL,cfg:{}}],
-    [{tag:ZN,cfg:{entity:'valve.front_lawn'}},{tag:ZN,cfg:{entity:'valve.garden_beds'}}]]},
-  'preview-dark': {theme:'dark', cols:[
-    [{tag:CTRL,cfg:{}}],
-    [{tag:ZN,cfg:{entity:'valve.front_lawn'}},{tag:ZN,cfg:{entity:'valve.garden_beds'}}]]},
-  'controller-card': {theme:'light', cols:[
-    [{tag:CTRL,cfg:CTRL_CFG,after:expand}]]},
-  'controller-card-dark': {theme:'dark', cols:[
-    [{tag:CTRL,cfg:CTRL_CFG,after:expand}]]},
-  'controller-collapsed': {theme:'light', cols:[
-    [{tag:CTRL,cfg:CTRL_CFG}]]},
-  'controller-collapsed-dark': {theme:'dark', cols:[
-    [{tag:CTRL,cfg:CTRL_CFG}]]},
-  // show_programs:false — the drawer keeps its toggle and holds Status alone.
-  'controller-status-only': {theme:'light', caps:true, cols:[
-    [{cap:'Collapsed',tag:CTRL,cfg:Object.assign({show_programs:false},CTRL_CFG)},
-     {cap:'Expanded',tag:CTRL,cfg:Object.assign({show_programs:false},CTRL_CFG),after:expand}]]},
-  'zone-card-states': {theme:'light', caps:true, cols:[
-    [{cap:'Idle',tag:ZN,cfg:{entity:'valve.garden_beds'}},
-     {cap:'Fault',tag:ZN,cfg:{entity:'valve.side_strip'},mutate:faultOn}],
-    [{cap:'Running',tag:ZN,cfg:{entity:'valve.front_lawn'}},
-     {cap:'Unavailable',tag:ZN,cfg:{entity:'valve.back_lawn'}}]]},
-  'zone-card-off': {theme:'light', cols:[
-    [{tag:CTRL,cfg:{},mutate:offMode}],
-    [{tag:ZN,cfg:{entity:'valve.front_lawn'},mutate:offMode}]]},
+  preview: {theme:'light', cols:[[{tag:C,cfg:CARD_CFG,after:expandSettings}]]},
+  'preview-dark': {theme:'dark', cols:[[{tag:C,cfg:CARD_CFG,after:expandSettings}]]},
+  'preview-mobile': {theme:'light', colw:343, pad:16, cols:[[{tag:C,cfg:CARD_CFG}]]},
+  'card-collapsed': {theme:'light', cols:[[{tag:C,cfg:CARD_CFG}]]},
+  'card-collapsed-dark': {theme:'dark', cols:[[{tag:C,cfg:CARD_CFG}]]},
+  'card-settings': {theme:'light', cols:[[{tag:C,cfg:CARD_CFG,after:expandSettings}]]},
+  'card-settings-dark': {theme:'dark', cols:[[{tag:C,cfg:CARD_CFG,after:expandSettings}]]},
+  'card-programs': {theme:'light', cols:[[{tag:C,cfg:CARD_CFG,after:expandPrograms}]]},
+  'card-programs-dark': {theme:'dark', cols:[[{tag:C,cfg:CARD_CFG,after:expandPrograms}]]},
+  'card-off': {theme:'light', cols:[[{tag:C,cfg:CARD_CFG,mutate:offMode}]]},
+  'card-hub-offline': {theme:'light', cols:[[{tag:C,cfg:CARD_CFG,mutate:hubOff,after:expandSettings}]]},
   'flood-sensor': {theme:'light', caps:true, cols:[
-    [{cap:'Dry',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'}}],
-    [{cap:'Water detected',tag:ZN,cfg:{entity:'binary_sensor.basement_flood_sensor'},mutate:wet}]]},
-  'zone-programs': {theme:'light', caps:true, cols:[
-    [{cap:'Collapsed (default)',tag:ZN,cfg:{entity:'valve.front_lawn'}},
-     {cap:'No program enabled',tag:ZN,cfg:{entity:'valve.front_lawn'},
-      mutate:s2=>{['a','b','c','d','e','f'].forEach(L=>{
-        const k='switch.bhyve_xr_'+L+'_program';
-        s2[k]=st('off',Object.assign({},s2[k].attributes));});}}],
-    [{cap:'Expanded',tag:ZN,cfg:{entity:'valve.front_lawn'},
-      after:c=>{c._programsOpen=true;c._render();}}]]},
-  'zone-selection': {theme:'light', caps:true, cols:[
-    [{cap:'Before — Program A enabled',tag:ZN,cfg:{entity:'valve.front_lawn'},
-      after:c=>{c._programsOpen=true;c._render();}}],
-    [{cap:'After — tapped Program C',tag:ZN,cfg:{entity:'valve.front_lawn'},
-      after:c=>{c._programsOpen=true;c._render();
-        c.shadowRoot.querySelectorAll('[data-act]').forEach(e=>{
-          if(e.dataset.act==='program'&&e.dataset.entity==='switch.bhyve_xr_c_program')
-            e.click();});
-        c._programsOpen=true;c._render();}}]]},
-  'preview-mobile': {theme:'light', colw:343, pad:16, cols:[
-    [{tag:CTRL,cfg:{}},{tag:ZN,cfg:{entity:'valve.front_lawn'}}]]},
-  'empty-state': {theme:'light', cols:[
-    [{tag:CTRL,cfg:{device_id:'no-such-device'}}]]},
+    [{cap:'Dry',tag:C,cfg:{entity:'binary_sensor.basement_flood_sensor'}}],
+    [{cap:'Water detected',tag:C,cfg:{entity:'binary_sensor.basement_flood_sensor'},mutate:wet}]]},
+  'empty-state': {theme:'light', cols:[[{tag:C,cfg:{device_id:'no-such-device'}}]]},
 };
 
 const COMPOSE = Q.get('compose');
