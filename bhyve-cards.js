@@ -1,13 +1,14 @@
 // =============================================================================
-// B-hyve Cards for Home Assistant — v3.0.0
-//   custom:bhyve-controller-card  — one per B-hyve device
-//   custom:bhyve-zone-card        — one per zone / flood sensor
+// B-hyve Cards for Home Assistant — v5.0.0
+//   custom:bhyve-card  — one per B-hyve device: zone rows, status, programs
+//                        and settings. Also renders B-hyve flood sensors.
 //
-// Both card types live in this one file so HACS ships a single JS resource and
-// Lovelace has no resource-ordering problem. See README "Why one file".
+// v5 merges the v3-v4 pair (bhyve-controller-card + bhyve-zone-card) into this
+// single card. custom:bhyve-controller-card stays registered as an alias so a
+// v4 dashboard keeps rendering; custom:bhyve-zone-card is gone.
 //
-// Design source: "BHyve Card Family" (Claude Design project 9c531b4e) — the
-// controller card follows the v5b states, the zone card the v4 ones.
+// Design source: the v5b states of "BHyve Card Family v5.dc.html" (design
+// project 9c531b4e). v5a, the reordered chip row, was not selected.
 // Integration:   https://github.com/sebr/bhyve-home-assistant
 // Repository:    https://github.com/reypm/Orbit-BHyve-Custom-Card
 // =============================================================================
@@ -15,11 +16,12 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION   = '4.1.0';
-  const CONTROLLER     = 'bhyve-controller-card';
-  const ZONE           = 'bhyve-zone-card';
-  const CONTROLLER_ED  = 'bhyve-controller-card-editor';
-  const ZONE_ED        = 'bhyve-zone-card-editor';
+  const CARD_VERSION   = '5.0.0';
+  const CARD           = 'bhyve-card';
+  const CARD_ED        = 'bhyve-card-editor';
+  // v4 and earlier shipped this name. Kept registered as an alias of the same
+  // card so upgrading does not blank every dashboard that uses it.
+  const LEGACY_CARD    = 'bhyve-controller-card';
 
   // ---------------------------------------------------------------------------
   // Design tokens
@@ -41,7 +43,6 @@
     controller: 'mdi:sprinkler-variant',
     zone:       'mdi:sprinkler',
     flood:      'mdi:home-flood',
-    unknown:    'mdi:help-circle-outline',
     warn:       'mdi:alert',
     tune:       'mdi:tune',
     down:       'mdi:chevron-down',
@@ -50,19 +51,14 @@
     timer:      'mdi:timer-outline',
     smart:      'mdi:brain',
     calendar:   'mdi:calendar-month',
-    noProgram:  'mdi:calendar-remove',
-    more:       'mdi:dots-horizontal',
     minus:      'mdi:minus',
     plus:       'mdi:plus',
     play:       'mdi:play',
     stop:       'mdi:stop',
-    blocked:    'mdi:cancel',
     wifi:       'mdi:wifi',
     wifiOff:    'mdi:wifi-off',
     battery:    'mdi:battery',
     batteryLow: 'mdi:battery-alert',
-    history:    'mdi:history',
-    drop:       'mdi:water',
     chart:      'mdi:chart-bar',
     clock:      'mdi:clock-outline',
     thermo:     'mdi:thermometer',
@@ -149,22 +145,7 @@
       transition: background-color 180ms;
     }
     .btn.stop { background: rgba(${RGB.red}, .22); color: rgb(${RGB.red}); }
-    .btn.blocked {
-      background: var(--bh-shape); color: var(--secondary-text-color);
-      cursor: not-allowed;
-    }
     .btn ha-icon { --mdc-icon-size: 22px; }
-
-    .icon-btn {
-      display: flex; align-items: center; justify-content: center;
-      width: 42px; height: 42px; border-radius: 12px; flex: 0 0 auto;
-      border: 1px solid var(--bh-divider); background: transparent;
-      color: var(--secondary-text-color); transition: background-color 180ms;
-    }
-    .icon-btn ha-icon { --mdc-icon-size: 22px; }
-    .icon-btn.on { border-color: transparent; }
-    .icon-btn.on.accent { background: rgba(${RGB.accent}, .22); color: rgb(${RGB.accent}); }
-    .icon-btn.on.purple { background: rgba(${RGB.purple}, .22); color: rgb(${RGB.purple}); }
 
     /* ── Toggle switch ───────────────────────────────────────────────── */
     .sw {
@@ -214,7 +195,7 @@
     }
   `;
 
-  const CONTROLLER_STYLES = `
+  const CARD_STYLES = `
     /* ── Hub dot ─────────────────────────────────────────────────────
        Hub status is a property of the device, so it rides on the device's own
        icon rather than costing a row or a chip. It is the only ambient
@@ -229,9 +210,10 @@
     }
     .hub-dot.off { background: rgb(${RGB.red}); }
 
-    /* The Next run sub-line names the zone, which is the whole point of it, and
-       does not fit on one 380px line. Status rows have no control on the right
-       to collide with, so their sub-line wraps rather than ellipses. */
+    /* Several drawer sub-lines carry the sentence that makes the row mean
+       something — "Earliest across all zones · Front Lawn", "Sets manual preset
+       on every zone" — and none of them fits one 380px line beside a value or a
+       stepper. Ellipsing eats the informative half, so these wrap. */
     .drawer .row .secondary.wrap { white-space: normal; }
 
     /* Status rows are read-only. The right edge carries the value as plain
@@ -292,6 +274,20 @@
     }
     .hr { height: 1px; background: var(--bh-divider); margin: 8px 6px; }
 
+    /* Disabled programs are a subsection, not a second fold: a count label with
+       a hairline running to the right edge, and the off rows below it. The
+       settings drawer is where you go to configure programs, so hiding half of
+       them behind another tap inside a section you already opened would be one
+       fold too many. */
+    .sub-head { display: flex; align-items: center; gap: 8px; padding: 10px 6px 4px; }
+    .sub-head b {
+      font-size: 11.5px; font-weight: 500; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--secondary-text-color);
+    }
+    .sub-head i { flex: 1; height: 1px; background: var(--bh-divider); }
+    /* Only the name steps back — the switch stays live. */
+    .drawer .row.prog-off .primary { color: var(--secondary-text-color); }
+
     .stepper {
       display: flex; align-items: center; gap: 2px; height: 38px; flex: 0 0 auto;
       background: var(--bh-shape); border-radius: 12px; padding: 0 4px;
@@ -323,37 +319,8 @@
     }
   `;
 
-  const ZONE_STYLES = `
-    .zone-actions { display: flex; gap: 8px; padding: 0 10px 10px; }
-    .zone-actions .btn { flex: 1; }
-    .rows-divider { height: 1px; background: var(--bh-divider); margin: 0 10px; }
-    .rows {
-      padding: 6px 10px 10px;
-      display: flex; flex-direction: column; gap: 2px;
-    }
-    .rows .row { padding: 6px; }
-    /* The one enabled program carries a 10% accent fill. */
-    .rows .row.prog-on {
-      border-radius: 12px; background: rgba(${RGB.accent}, .10);
-    }
-    .rows .secondary.accent { color: rgb(${RGB.accent}); }
-
-    .fold-btn {
-      display: flex; align-items: center; gap: 10px; width: 100%;
-      padding: 6px; border-radius: 12px; background: transparent;
-      transition: background-color 180ms;
-    }
-    .fold-btn.open, .fold-btn:hover { background: var(--bh-shape); }
-    .fold-label {
-      flex: 1; text-align: left; min-width: 0;
-      font-size: 14px; font-weight: 500; line-height: 20px;
-      color: var(--secondary-text-color);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-  `;
-
   // ---------------------------------------------------------------------------
-  // Formatting helpers (shared by both cards)
+  // Formatting helpers
   // ---------------------------------------------------------------------------
   function esc(str) {
     return String(str == null ? '' : str)
@@ -395,16 +362,6 @@
     if (days === 0) return 'Today ' + fmtTime(d);
     if (days === 1) return 'Tomorrow ' + fmtTime(d);
     return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + fmtTime(d);
-  }
-
-  // "3 d ago" / "4 h ago" / "12 min ago"
-  function fmtSince(value) {
-    const d = value instanceof Date ? value : new Date(value);
-    if (!d || isNaN(d.getTime())) return null;
-    const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
-    if (mins < 60) return mins + ' min ago';
-    if (mins < 1440) return Math.floor(mins / 60) + ' h ago';
-    return Math.floor(mins / 1440) + ' d ago';
   }
 
   function batteryIcon(pct) {
@@ -499,71 +456,28 @@
     return id.startsWith(domain + '.') && id.endsWith(suffix);
   }
 
-  // Resolve one related entity for a zone.
+  // Resolve one entity registered to the same device as another — the flood
+  // sensor's temperature, signal and battery readings. A name match wins;
+  // failing that a lone candidate is taken, since a flood sensor is a
+  // single-entity device with nothing to confuse it with.
   //
-  // A name match always wins. Failing that, a lone candidate is assumed to be
-  // device-level and shared (fault, rain delay, device mode). That assumption
-  // is wrong for per-zone entities — hub, battery, history, smart watering —
-  // on a multi-zone device, where a zone lacking its own sensor would silently
-  // borrow a sibling zone's reading, so those require the match unless the
-  // device only has one zone to begin with.
-  function pickForZone(candidates, zoneEntityId, opts) {
-    const o = opts || {};
+  // The v4 zone card needed a perZone flag here to stop a zone borrowing a
+  // sibling zone's battery reading. v5 resolves every device-level entity
+  // through resolveDevice instead, so that flag no longer has a caller.
+  function pickSibling(candidates, entityId) {
     if (!candidates.length) return null;
-    const zoneTokens = objectId(zoneEntityId).split('_').filter(Boolean);
-    const exact = zoneTokens.length ? candidates.find(c => {
-      const tokens = objectId(c).split('_').filter(Boolean);
-      return zoneTokens.every(t => tokens.includes(t));
+    const tokens = objectId(entityId).split('_').filter(Boolean);
+    const exact = tokens.length ? candidates.find(c => {
+      const t = objectId(c).split('_').filter(Boolean);
+      return tokens.every(x => t.includes(x));
     }) : null;
-    if (exact) return exact;
-    if (o.perZone && o.zoneCount > 1) return null;
-    return candidates.length === 1 ? candidates[0] : null;
+    return exact || (candidates.length === 1 ? candidates[0] : null);
   }
 
   // ---------------------------------------------------------------------------
-  // Resolvers — turn one entity into the full set of related B-hyve entities.
+  // Resolver — turn one device into the full set of related B-hyve entities.
   // Explicit config always wins over discovery.
   // ---------------------------------------------------------------------------
-  function resolveZone(hass, zoneEntityId, cfg) {
-    const c   = cfg || {};
-    const sib = siblingsOf(zoneEntityId).map(e => e.entity_id);
-    const zoneCount = sib.filter(id => id.startsWith('valve.')).length;
-    const pick = (suffix, domain, perZone) =>
-      pickForZone(sib.filter(id => matches(id, domain, suffix)), zoneEntityId,
-                  { perZone: perZone, zoneCount: zoneCount });
-
-    const zoneState = hass && hass.states ? hass.states[zoneEntityId] : null;
-    const station   = zoneState ? zoneState.attributes.station : null;
-
-    // Programs are device-level; a program belongs to this zone when one of its
-    // run_times targets this zone's station.
-    let programs = c.program_entities;
-    if (!programs) {
-      programs = sib
-        .filter(id => matches(id, 'switch', '_program'))
-        .filter(id => {
-          if (station == null) return true;
-          const runTimes = hass && hass.states[id]
-            ? hass.states[id].attributes.run_times : null;
-          if (!Array.isArray(runTimes)) return true;
-          return runTimes.some(rt => String(rt.station) === String(station));
-        });
-    }
-
-    return {
-      station,
-      hub:           c.hub_entity            || pick('_connected', 'binary_sensor', true),
-      battery:       c.battery_entity        || pick('_battery_level', 'sensor', true),
-      history:       c.history_entity        || pick('_zone_history', 'sensor', true),
-      fault:         c.fault_entity          || pick('_fault', 'binary_sensor'),
-      rainDelay:     c.rain_delay_entity     || pick('_rain_delay', 'switch'),
-      smartWatering: c.smart_watering_entity || pick('_smart_watering', 'switch', true),
-      nextWatering:  c.next_watering_entity  || pick('_next_watering', 'sensor'),
-      weeklyVolume:  c.weekly_volume_entity  || null,
-      programs:      programs || [],
-    };
-  }
-
   // Zones read in the order the controller numbers them, not alphabetically.
   function sortByStation(hass, zoneIds) {
     const station = id => {
@@ -799,20 +713,27 @@
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // "Mon, Wed, Fri · 06:00 · 10 min"
+  // "Mon, Wed, Fri · 06:00 · 10 min", or "Weather adjusted · soil 61%".
   function programSummary(hass, programEntityId, station) {
     const st = hass && hass.states ? hass.states[programEntityId] : null;
     if (!st) return '';
     const a = st.attributes || {};
     const parts = [];
 
+    // A weather-adjusted program picks its own start times and durations, so
+    // printing a fixed schedule for it would state something the device does
+    // not follow. It reports what drives the decision instead.
+    if (a.is_smart_program) {
+      const soil = num(a.soil_moisture_level);
+      return ['Weather adjusted', soil == null ? null : 'soil ' + Math.round(soil) + '%']
+        .filter(Boolean).join(' · ');
+    }
+
     const freq = a.frequency || {};
     if (Array.isArray(freq.days) && freq.days.length) {
       parts.push(freq.days.map(d => DAY_NAMES[d] || d).join(', '));
     } else if (freq.interval) {
       parts.push('Every ' + freq.interval + ' days');
-    } else if (a.is_smart_program) {
-      parts.push('Weather adjusted');
     }
 
     const times = Array.isArray(a.start_times) ? a.start_times
@@ -883,406 +804,24 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Zone card
+  // The card
   // ---------------------------------------------------------------------------
-  class BhyveZoneCard extends BhyveBase {
-    static getConfigElement() { return document.createElement(ZONE_ED); }
-    static getStubConfig(hass) {
-      const valve = hass && hass.states
-        ? Object.keys(hass.states).find(id => id.startsWith('valve.')) : null;
-      return { entity: valve || '', run_time: 10 };
-    }
-
-    setConfig(config) {
-      if (!config || !config.entity) {
-        throw new Error('[bhyve-zone-card] "entity" is required (the zone valve).');
-      }
-      this._config = Object.assign(
-        { run_time: 10, show_smart_watering_and_programs: true }, config);
-      if (this._hass) this._render();
-    }
-
-    getCardSize() { return 4; }
-
-    _render() {
-      if (!this._config || !this._hass) return;
-      const c = this._config;
-
-      if (isFloodEntity(this._hass, c.entity)) { this._renderFlood(); return; }
-
-      const zoneId = c.entity;
-      const r      = resolveZone(this._hass, zoneId, c);
-      const st     = this._st(zoneId);
-
-      const unavailable = this._isUnavailable(zoneId);
-      const fault       = !unavailable && r.fault
-        ? faultText(this._hass, r.fault, r.station) : null;
-      const running     = !unavailable && !fault && this._isOn(zoneId);
-
-      const name = c.name || (st && st.attributes.zone_name)
-        || (st && st.attributes.friendly_name) || objectId(zoneId);
-
-      let accent = RGB.grey, icon = ICON.zone, secondary, secColor = '';
-      if (unavailable) {
-        icon = ICON.unknown;
-        secondary = 'Unavailable · entity not reporting';
-      } else if (fault) {
-        accent = RGB.red;
-        secondary = 'Fault · will not run';
-        secColor = ` style="color: rgb(${RGB.red});"`;
-      } else if (running) {
-        accent = RGB.accent;
-        const left = this._remaining(zoneId, c.run_time);
-        secondary = left == null ? 'Watering' : 'Watering · ' + fmtClock(left) + ' left';
-        secColor = ` style="color: rgb(${RGB.accent});"`;
-      } else {
-        secondary = r.station != null ? 'Idle · station ' + r.station : 'Idle';
-      }
-
-      const chips = unavailable ? this._unavailableChips(r) : this._chips(r, running);
-      const rows  = (unavailable || fault) ? '' : this._rows(r);
-
-      let bar = '';
-      if (running) {
-        const left  = this._remaining(zoneId, c.run_time);
-        const total = (this._runMinutes[zoneId]
-          || this._presetRuntimeMinutes(zoneId) || c.run_time || 10) * 60;
-        const pct = left == null ? 0 : Math.max(0, Math.min(100, (1 - left / total) * 100));
-        bar = `<div class="bar"><div style="width: ${pct}%;"></div></div>`;
-      }
-
-      this.shadowRoot.innerHTML = `
-        <style>${BASE_STYLES}${ZONE_STYLES}</style>
-        <ha-card class="${fault ? 'accent-red' : ''}">
-          <div class="row">
-            ${shapeHtml(icon, accent, 'lg')}
-            <div class="grow">
-              <div class="primary${unavailable ? ' muted' : ''} zone-name">${esc(name)}</div>
-              <div class="secondary"${secColor}>${esc(secondary)}</div>
-            </div>
-          </div>
-          ${fault ? `<div class="banner red">
-            <ha-icon icon="${ICON.warn}"></ha-icon><span>${esc(fault)}</span></div>` : ''}
-          ${unavailable ? '' : this._actions(r, running, !!fault)}
-          ${bar}
-          <div class="chips">${chips}</div>
-          ${rows}
-        </ha-card>
-      `;
-
-      this._bind(r);
-      this._syncTick(running);
-    }
-
-    // Fixed order: hub → battery → last run → last volume → week → next/rain.
-    _chips(r, running) {
-      const out = [];
-
-      if (r.hub) {
-        const online = this._isOn(r.hub);
-        out.push(online
-          ? chipHtml(ICON.wifi, 'Hub online', RGB.green, true)
-          : chipHtml(ICON.wifiOff, 'Hub offline', RGB.red, true));
-      }
-
-      const battery = num(this._st(r.battery) && this._st(r.battery).state);
-      if (battery != null) {
-        const low = battery <= 20;
-        out.push(chipHtml(batteryIcon(battery), Math.round(battery) + '%',
-                          low ? RGB.orange : RGB.green, low));
-      }
-
-      // Duration and volume come from the same history entry, so they appear
-      // and disappear together.
-      const runTime = this._attr(r.history, 'run_time');
-      if (r.history && runTime != null) {
-        out.push(chipHtml(ICON.history, fmtDuration(runTime), RGB.grey, false));
-        const gal = num(this._attr(r.history, 'consumption_gallons'));
-        if (gal != null) out.push(chipHtml(ICON.drop, gal.toFixed(1) + ' gal', RGB.grey, false));
-      }
-
-      // Optional, and never rendered as a zero.
-      const week = num(this._st(r.weeklyVolume) && this._st(r.weeklyVolume).state);
-      if (r.weeklyVolume && week != null && week > 0) {
-        out.push(chipHtml(ICON.chart, week.toFixed(1) + ' gal', RGB.grey, false));
-      }
-
-      // One slot: rain delay replaces next run while it is active.
-      if (r.rainDelay && this._isOn(r.rainDelay)) {
-        const h = rainDelayHours(this._hass, r.rainDelay);
-        out.push(chipHtml(ICON.rain, h ? 'Delay ' + h + ' h' : 'Rain delay', RGB.accent, true));
-      } else {
-        const next = this._nextRun(r);
-        if (next) out.push(chipHtml(ICON.clock, next, RGB.grey, false));
-      }
-      return out.join('');
-    }
-
-    _unavailableChips(r) {
-      const out = [];
-      if (r.hub) {
-        const online = this._isOn(r.hub);
-        out.push(online
-          ? chipHtml(ICON.wifi, 'Hub online', RGB.green, true)
-          : chipHtml(ICON.wifiOff, 'Hub offline', RGB.red, true));
-      }
-      const st = this._st(this._config.entity);
-      const seen = st ? fmtSince(st.last_changed) : null;
-      if (seen) out.push(chipHtml(ICON.clock, 'Last seen ' + seen, RGB.grey, false));
-      return out.join('');
-    }
-
-    _nextRun(r) {
-      const attrNext = this._attr(this._config.entity, 'next_start_time');
-      if (attrNext) {
-        const label = relativeFuture(attrNext);
-        if (label) return label;
-      }
-      const st = this._st(r.nextWatering);
-      if (st && !['unavailable', 'unknown', ''].includes(st.state)) {
-        return relativeFuture(st.state);
-      }
-      return null;
-    }
-
-    _actions(r, running, blocked) {
-      const c = this._config;
-      // Label and dispatched value are derived from one rounded integer, so a
-      // display fix can never drift from what actually gets watered.
-      const mins = Math.max(1, Math.round(
-        this._presetRuntimeMinutes(c.entity) || c.run_time || 10));
-
-      let main;
-      if (blocked) {
-        main = `<button class="btn blocked" disabled>
-          <ha-icon icon="${ICON.blocked}"></ha-icon>Run blocked</button>`;
-      } else if (running) {
-        main = `<button class="btn stop" data-act="stop">
-          <ha-icon icon="${ICON.stop}"></ha-icon>Stop</button>`;
-      } else {
-        main = `<button class="btn" data-act="run" data-minutes="${mins}">
-          <ha-icon icon="${ICON.play}"></ha-icon>Run ${mins} min</button>`;
-      }
-
-      // Same rule as the chip row: render only what there is data for.
-      const rain = r.rainDelay ? `
-          <button class="icon-btn accent${this._isOn(r.rainDelay) ? ' on' : ''}"
-            data-act="rain" title="Rain delay">
-            <ha-icon icon="${ICON.rain}"></ha-icon></button>` : '';
-      const smart = r.smartWatering ? `
-          <button class="icon-btn purple${this._isOn(r.smartWatering) ? ' on' : ''}"
-            data-act="smart" title="Smart watering">
-            <ha-icon icon="${ICON.smart}"></ha-icon></button>` : '';
-      return `
-        <div class="zone-actions">
-          ${main}${rain}${smart}
-        </div>`;
-    }
-
-    // Programs are a single-selection group: B-hyve hardware runs one program
-    // at a time. The section shows Smart watering, the one enabled program (or
-    // a neutral row saying there is none), and folds the rest away.
-    _rows(r) {
-      // Whether the section appears at all. Deliberately not named
-      // `show_programs`: that key shipped in v3.1/v3.2 with these semantics and
-      // was removed in v4, so reusing it would silently revive the old meaning
-      // for anyone whose config still carries it. This is the only axis left —
-      // when the section is shown it always uses the v4 fold.
-      if (this._config.show_smart_watering_and_programs === false) return '';
-      const rows = [];
-
-      // Smart watering is exempt from all of it — it adjusts whatever schedule
-      // runs rather than competing with the lettered programs for exclusivity,
-      // so it is always first, always visible, and never counted as disabled.
-      if (r.smartWatering) {
-        const on = this._isOn(r.smartWatering);
-        const moisture = num(this._attr(r.smartWatering, 'soil_moisture_level'))
-          ?? num(this._attr(r.smartWatering, 'soil_moisture'));
-        const detail = moisture != null
-          ? 'Soil moisture ' + Math.round(moisture) + '%' : (on ? 'Enabled' : 'Disabled');
-        rows.push(`
-          <div class="row">
-            ${shapeHtml(ICON.smart, on ? RGB.purple : RGB.grey)}
-            <div class="grow">
-              <div class="primary">Smart watering</div>
-              <div class="secondary">${esc(detail)}</div>
-            </div>
-            ${swHtml(on, true, `data-act="toggle" data-entity="${esc(r.smartWatering)}"`)}
-          </div>`);
-      }
-
-      const programs = r.programs || [];
-      // If the B-hyve app has left two programs on, show the first as enabled
-      // and leave the other in the list still reading on, rather than silently
-      // correcting something the user did elsewhere.
-      const enabledId = programs.filter(pid => this._isOn(pid))[0] || null;
-      const rest = programs.filter(pid => pid !== enabledId);
-
-      if (enabledId) {
-        rows.push(this._programRow(r, enabledId, true));
-      } else {
-        // A zone with no schedule is a legitimate setup, not a fault — neutral
-        // colours, and no switch on this row.
-        rows.push(`
-          <div class="row">
-            ${shapeHtml(ICON.noProgram, RGB.grey)}
-            <div class="grow">
-              <div class="primary muted">No program enabled</div>
-              <div class="secondary">This zone only waters when you run it manually</div>
-            </div>
-          </div>`);
-      }
-
-      if (rest.length) {
-        const open  = !!this._programsOpen;
-        const label = (open ? 'Hide ' : '') + rest.length +
-          (rest.length === 1 ? ' disabled program' : ' disabled programs');
-        rows.push(`
-          <button class="fold-btn${open ? ' open' : ''}" data-act="programs-fold">
-            ${shapeHtml(ICON.more, RGB.grey)}
-            <span class="fold-label">${esc(label)}</span>
-            <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
-          </button>`);
-        if (open) {
-          rest.forEach(pid => rows.push(this._programRow(r, pid, this._isOn(pid))));
-        }
-      }
-
-      return rows.length
-        ? `<div class="rows-divider"></div><div class="rows">${rows.join('')}</div>`
-        : '';
-    }
-
-    _programRow(r, pid, on) {
-      return `
-        <div class="row${on ? ' prog-on' : ''}">
-          ${shapeHtml(ICON.calendar, on ? RGB.accent : RGB.grey)}
-          <div class="grow">
-            <div class="primary${on ? '' : ' muted'}">${esc(programName(this._hass, pid))}</div>
-            <div class="secondary${on ? ' accent' : ''}">${esc(programSummary(this._hass, pid, r.station))}</div>
-          </div>
-          ${swHtml(on, false, `data-act="program" data-entity="${esc(pid)}"`)}
-        </div>`;
-    }
-
-    // Enabling a program disables whichever one was on, in the same handler.
-    // Both calls are dispatched together and the optimistic state is set before
-    // either is issued, so both rows move on the same render rather than
-    // waiting on the round trip.
-    _selectProgram(programs, tappedId) {
-      if (!tappedId) return;
-      const currentId = (programs || []).filter(pid => this._isOn(pid))[0] || null;
-      const touched = [tappedId];
-
-      if (currentId === tappedId) {
-        // Turning the enabled one off is a valid end state, not a no-op: the
-        // zone simply has no program until one is picked.
-        this._pendingOff.add(tappedId); this._pendingOn.delete(tappedId);
-        this._svc('switch', 'turn_off', { entity_id: tappedId });
-      } else {
-        this._pendingOn.add(tappedId); this._pendingOff.delete(tappedId);
-        this._svc('switch', 'turn_on', { entity_id: tappedId });
-        if (currentId) {
-          this._pendingOff.add(currentId); this._pendingOn.delete(currentId);
-          this._svc('switch', 'turn_off', { entity_id: currentId });
-          touched.push(currentId);
-        }
-      }
-
-      this._render();
-      setTimeout(() => {
-        touched.forEach(id => { this._pendingOn.delete(id); this._pendingOff.delete(id); });
-        this._render();
-      }, 8000);
-    }
-
-    _renderFlood() {
-      const c    = this._config;
-      const st   = this._st(c.entity);
-      const wet  = !!st && st.state === 'on';
-      const sib  = siblingsOf(c.entity).map(e => e.entity_id);
-      const pick = (suffix, domain) =>
-        pickForZone(sib.filter(id => matches(id, domain, suffix)), c.entity);
-
-      const temp   = c.temperature_entity || pick('_temperature', 'sensor');
-      const signal = c.signal_entity      || pick('_signal_strength', 'sensor');
-      const batt   = c.battery_entity     || pick('_battery_level', 'sensor')
-                                          || pick('_battery', 'sensor');
-
-      const name = c.name || (st && st.attributes.friendly_name) || objectId(c.entity);
-      const when = st ? fmtTime(new Date(st.last_changed)) : '';
-      const secondary = wet ? 'Water detected · ' + when : 'Dry';
-
-      const chips = [];
-      const t = num(this._st(temp) && this._st(temp).state);
-      if (t != null) {
-        const unit = this._attr(temp, 'unit_of_measurement', '°F');
-        chips.push(chipHtml(ICON.thermo, Math.round(t) + ' ' + unit, RGB.grey, false));
-      }
-      const sig = num(this._st(signal) && this._st(signal).state);
-      if (sig != null) chips.push(chipHtml(ICON.wifi, sig + ' dBm', RGB.grey, false));
-      const b = num(this._st(batt) && this._st(batt).state);
-      if (b != null) {
-        const low = b <= 20;
-        chips.push(chipHtml(batteryIcon(b), Math.round(b) + '%',
-                            low ? RGB.orange : RGB.green, low));
-      }
-
-      this.shadowRoot.innerHTML = `
-        <style>${BASE_STYLES}${ZONE_STYLES}</style>
-        <ha-card class="${wet ? 'accent-red' : ''}">
-          <div class="row">
-            ${shapeHtml(ICON.flood, wet ? RGB.red : RGB.accent, 'lg')}
-            <div class="grow">
-              <div class="primary">${esc(name)}</div>
-              <div class="secondary"${wet ? ` style="color: rgb(${RGB.red});"` : ''}>${esc(secondary)}</div>
-            </div>
-          </div>
-          <div class="chips">${chips.join('')}</div>
-        </ha-card>`;
-    }
-
-    _bind(r) {
-      const root = this.shadowRoot;
-
-      const name = root.querySelector('.zone-name');
-      if (name) name.addEventListener('click', () => this._moreInfo(this._config.entity));
-
-      root.querySelectorAll('[data-act]').forEach(el => {
-        el.addEventListener('click', e => {
-          e.stopPropagation();
-          const act = el.dataset.act;
-          if (act === 'run')        this._runZone(this._config.entity, el.dataset.minutes);
-          else if (act === 'stop')  this._stopZone(this._config.entity);
-          else if (act === 'rain')  this._setRainDelay(r.rainDelay, this._config.rain_delay_hours);
-          else if (act === 'smart') this._toggle(r.smartWatering);
-          else if (act === 'toggle') this._toggle(el.dataset.entity);
-          else if (act === 'program') this._selectProgram(r.programs, el.dataset.entity);
-          else if (act === 'programs-fold') {
-            this._programsOpen = !this._programsOpen; this._render();
-          }
-        });
-      });
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Controller card
-  // ---------------------------------------------------------------------------
-  class BhyveControllerCard extends BhyveBase {
+  class BhyveCard extends BhyveBase {
     constructor() {
       super();
-      this._expanded    = false;
+      // One open flag per accordion. Both start closed, so the card rests at
+      // header + zone rows + two toggle rows.
+      this._open        = { settings: false, programs: false };
       this._runtime     = null;
       this._toast       = null;
       this._presetLocal = false;   // true once the device rejected the preset
     }
 
-    static getConfigElement() { return document.createElement(CONTROLLER_ED); }
+    static getConfigElement() { return document.createElement(CARD_ED); }
     static getStubConfig() { return { show_actions: true }; }
 
     setConfig(config) {
-      if (!config) throw new Error('[bhyve-controller-card] Invalid configuration.');
+      if (!config) throw new Error('[bhyve-card] Invalid configuration.');
       this._config = Object.assign({ show_actions: true, show_programs: true }, config);
       if (this._hass) this._render();
     }
@@ -1292,17 +831,29 @@
     // Configured device, else the first discovered B-hyve device with zones.
     _deviceId() {
       if (this._config.device_id) return this._config.device_id;
-      if (this._config.zones && this._config.zones.length) {
-        return deviceIdOf(this._config.zones[0]);
-      }
+      const first = this._zones(null)[0];
+      if (first) return deviceIdOf(first);
       if (!_registry) return null;
       const withZones = _registry.entities.filter(e => e.entity_id.startsWith('valve.'));
       return withZones.length ? withZones[0].device_id : null;
     }
 
+    // zones takes entity ids or { entity, name } objects. The object form
+    // carries a per-zone display name, which is what the v4 zone card had as
+    // its own name option — the only per-zone setting v5b still renders.
     _zones(dev) {
-      if (this._config.zones && this._config.zones.length) return this._config.zones;
+      const cfg = this._config.zones;
+      if (Array.isArray(cfg) && cfg.length) {
+        return cfg.map(z => (typeof z === 'string' ? z : z && z.entity)).filter(Boolean);
+      }
       return dev ? dev.zones : [];
+    }
+
+    _zoneNameOverride(zoneId) {
+      const cfg = this._config.zones;
+      if (!Array.isArray(cfg)) return null;
+      const hit = cfg.find(z => z && typeof z === 'object' && z.entity === zoneId);
+      return (hit && hit.name) || null;
     }
 
     _presetMinutes(zones) {
@@ -1317,13 +868,20 @@
     _render() {
       if (!this._config || !this._hass) return;
 
+      // A flood sensor is its own B-hyve device with none of a controller's
+      // parts, so pointing the card at one renders the flood layout instead.
+      if (this._config.entity && isFloodEntity(this._hass, this._config.entity)) {
+        this._renderFlood();
+        return;
+      }
+
       const deviceId = this._deviceId();
       const dev      = deviceId ? resolveDevice(this._hass, deviceId, this._config) : null;
       const zones    = this._zones(dev);
 
       if (!dev || !zones.length) {
         this.shadowRoot.innerHTML = `
-          <style>${BASE_STYLES}${CONTROLLER_STYLES}</style>
+          <style>${BASE_STYLES}${CARD_STYLES}</style>
           <ha-card>
               ${this._emptyHtml()}
           </ha-card>`;
@@ -1331,9 +889,9 @@
       }
 
       const showActions  = this._config.show_actions !== false;
-      // Both options gate the drawer's controls block — programs, rain delay,
-      // run time. Neither touches the Status section: device health is not a
-      // control, and hiding the programs list was never meant to take it down.
+      // show_actions gates every control: Run/Stop, rain delay, run time and
+      // the programs section. show_programs gates the programs section alone.
+      // Neither reaches the Status rows.
       const showPrograms = this._config.show_programs !== false;
       const running     = zones.filter(z => this._isOn(z));
       const rainOn      = !!dev.rainDelay && this._isOn(dev.rainDelay);
@@ -1361,7 +919,7 @@
                title="${hubOnline ? 'Hub online' : 'Hub offline'}"></span>`;
 
       this.shadowRoot.innerHTML = `
-        <style>${BASE_STYLES}${CONTROLLER_STYLES}</style>
+        <style>${BASE_STYLES}${CARD_STYLES}</style>
         <ha-card class="${anyFault ? 'accent-red' : ''}">
           <div class="row head">
             <div class="icon-wrap">
@@ -1383,7 +941,7 @@
             <span>${esc(faultText(this._hass, dev.fault, null) || 'A station reports a fault.')}</span></div>` : ''}
           ${this._toast ? `<div class="toast">${esc(this._toast)}</div>` : ''}
           <div class="zone-rows">${this._zoneRows(zones, showActions, off)}</div>
-          ${this._drawer(dev, zones, showActions && showPrograms)}
+          ${this._sections(dev, zones, showActions, showPrograms)}
         </ha-card>`;
 
       this._bind(dev, zones);
@@ -1392,7 +950,8 @@
 
     _zoneName(zoneId) {
       const st = this._st(zoneId);
-      return (st && (st.attributes.zone_name || st.attributes.friendly_name))
+      return this._zoneNameOverride(zoneId)
+        || (st && (st.attributes.zone_name || st.attributes.friendly_name))
         || objectId(zoneId);
     }
 
@@ -1544,104 +1103,126 @@
       return rows;
     }
 
-    // The drawer holds two independent things.
+    // Two accordions, stacked below the zone rows, each with its own chevron
+    // and its own open state.
     //
-    // The Status section is read-only device health. Nothing gates it: the
-    // "hub and device health are always reachable" rule outranks the two
-    // options, both of which are about controls — show_actions hides Run/Stop,
-    // show_programs hides the programs list. Hiding either used to take Status
-    // down with it, which is the bug this shape exists to prevent. Only a
-    // config option written specifically for Status could hide it, and there
-    // isn't one.
+    // The split follows the read-only/actionable seam the Status section
+    // introduced, and it fixes what made one combined drawer awkward: opening
+    // it to nudge run time meant scrolling past every program first.
     //
-    // The controls block below it — programs, rain delay, run time — is what
-    // those two options gate, exactly as before.
-    //
-    // The toggle row renders when either part has something in it, so the
-    // collapsed card stays as compact as it was and Status is still one tap
-    // away rather than always on screen.
-    _drawer(dev, zones, controls) {
-      const status = this._statusRows(dev, zones);
-      if (!status.length && !controls) return '';
+    // Neither show_actions nor show_programs can hide the Status rows. Both are
+    // about controls, and read-only device health is not a control — hiding a
+    // control must never take device health with it. Only an option written
+    // specifically for Status could, and there is none.
+    _sections(dev, zones, showActions, showPrograms) {
+      const out = [];
 
-      const n      = (dev.programs || []).length;
-      // With only Status inside, the label already names it and the sub-line
-      // would just say "Status" under "Show status".
-      const hint   = controls
-        ? (status.length ? ['Status'] : [])
-            .concat([n + ' program' + (n === 1 ? '' : 's'), 'rain delay', 'run time'])
-            .join(' · ')
-        : '';
-      // And the row would otherwise offer to show settings that are not there.
-      const label  = controls ? 'programs &amp; settings' : 'status';
-      const open   = this._expanded;
+      const status  = this._statusRows(dev, zones);
+      const rain    = showActions ? this._rainRow(dev) : '';
+      const runtime = showActions ? this._runtimeRow(zones) : '';
 
-      if (!open) {
-        return this._drawerBtn(hint, false, label);
-      }
-
-      const statusHtml = status.length ? `
+      if (status.length || rain) {
+        const hint = [status.length ? 'Status' : null, rain ? 'rain delay' : null,
+                      runtime ? 'run time' : null].filter(Boolean).join(' · ');
+        const statusHtml = status.length ? `
           <div class="drawer-title">
             <b>Status · all zones</b>
             <span>Read-only. One row per device-level fact — nothing here is
             per zone.</span>
           </div>
           ${status.join('')}
-          ${controls ? '<div class="hr"></div>' : ''}` : '';
-
-      if (!controls) {
-        return this._drawerBtn(hint, true, label) +
-          `<div class="drawer">${statusHtml}</div>`;
+          ${rain ? '<div class="hr"></div>' : ''}` : '';
+        out.push(this._section('settings', ICON.tune, 'settings &amp; configuration',
+                               hint, statusHtml + rain + runtime));
       }
 
-      const programs = (dev.programs || []).map(pid => {
-        const on   = this._isOn(pid);
-        const icon = programIcon(this._hass, pid);
-        const rgb  = on ? (icon === ICON.smart ? RGB.purple : RGB.accent) : RGB.grey;
-        return `
-          <div class="row">
-            ${shapeHtml(icon, rgb)}
-            <div class="grow">
-              <div class="primary">${esc(programName(this._hass, pid))}</div>
-              <div class="secondary">${esc(programSummary(this._hass, pid, null))}</div>
-            </div>
-            ${swHtml(on, icon === ICON.smart, `data-act="toggle" data-entity="${esc(pid)}"`)}
-          </div>`;
-      }).join('');
-
-      const rainOn = !!dev.rainDelay && this._isOn(dev.rainDelay);
-      const hours  = rainDelayHours(this._hass, dev.rainDelay);
-      const cause  = this._attr(dev.rainDelay, 'cause')
-        || this._attr(dev.rainDelay, 'weather_type');
-      const rainDetail = rainOn
-        ? ['Active', hours ? hours + ' h remaining' : null, cause].filter(Boolean).join(' · ')
-        : 'Off';
-
-      const minutes = this._presetMinutes(zones);
-
-      return this._drawerBtn(hint, true, label) + `
-        <div class="drawer">
-          ${statusHtml}
+      const ids = showActions && showPrograms ? (dev.programs || []) : [];
+      if (ids.length) {
+        const on  = ids.filter(id => this._isOn(id));
+        const off = ids.filter(id => !this._isOn(id));
+        const body = `
           <div class="drawer-title">
             <b>Programs · all zones</b>
             <span>Every program on this controller, merged — programs are
             device-level, not per zone.</span>
           </div>
-          ${programs}
-          <div class="hr"></div>
+          ${on.map(id => this._programRow(id, true)).join('')}
+          ${off.length ? `
+          <div class="sub-head">
+            <b>${off.length} disabled program${off.length === 1 ? '' : 's'}</b>
+            <i></i>
+          </div>
+          ${off.map(id => this._programRow(id, false)).join('')}` : ''}`;
+        out.push(this._section('programs', ICON.calendar, 'programs · all zones',
+                               on.length + ' enabled · ' + off.length + ' disabled', body));
+      }
+
+      return out.join('');
+    }
+
+    // `label` carries markup (the &amp; in "settings & configuration"), so it is
+    // interpolated raw — every caller is a literal in this file.
+    _section(id, icon, label, hint, body) {
+      const open = !!this._open[id];
+      return `
+        <button class="drawer-btn${open ? ' open' : ''}" data-act="section"
+                data-section="${id}">
+          <ha-icon icon="${icon}"></ha-icon>
+          <span class="label">
+            <b>${open ? 'Hide' : 'Show'} ${label}</b>
+            ${hint ? `<span>${esc(hint)}</span>` : ''}
+          </span>
+          <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
+        </button>` +
+        (open ? `<div class="drawer">${body}</div>` : '');
+    }
+
+    // Enabled and disabled rows are the same row; only the name colour differs.
+    // The switch is live either way — this is not the zone card's
+    // single-selection list, programs here are independent.
+    _programRow(pid, enabled) {
+      const icon = programIcon(this._hass, pid);
+      const rgb  = enabled ? (icon === ICON.smart ? RGB.purple : RGB.accent) : RGB.grey;
+      return `
+        <div class="row${enabled ? '' : ' prog-off'}">
+          ${shapeHtml(icon, rgb)}
+          <div class="grow">
+            <div class="primary">${esc(programName(this._hass, pid))}</div>
+            <div class="secondary">${esc(programSummary(this._hass, pid, null))}</div>
+          </div>
+          ${swHtml(enabled, icon === ICON.smart,
+                   `data-act="toggle" data-entity="${esc(pid)}"`)}
+        </div>`;
+    }
+
+    _rainRow(dev) {
+      if (!dev.rainDelay) return '';
+      const on    = this._isOn(dev.rainDelay);
+      const hours = rainDelayHours(this._hass, dev.rainDelay);
+      const cause = this._attr(dev.rainDelay, 'cause')
+        || this._attr(dev.rainDelay, 'weather_type');
+      const detail = on
+        ? ['Active', hours ? hours + ' h remaining' : null, cause].filter(Boolean).join(' · ')
+        : 'Off';
+      return `
           <div class="row">
-            ${shapeHtml(ICON.rain, rainOn ? RGB.accent : RGB.grey)}
+            ${shapeHtml(ICON.rain, on ? RGB.accent : RGB.grey)}
             <div class="grow">
               <div class="primary">Rain delay</div>
-              <div class="secondary">${esc(rainDetail)}</div>
+              <div class="secondary wrap">${esc(detail)}</div>
             </div>
-            ${swHtml(rainOn, false, 'data-act="rain"')}
-          </div>
+            ${swHtml(on, false, 'data-act="rain"')}
+          </div>`;
+    }
+
+    _runtimeRow(zones) {
+      const minutes = this._presetMinutes(zones);
+      return `
           <div class="row">
             ${shapeHtml(ICON.timer, RGB.accent)}
             <div class="grow">
               <div class="primary">Run time</div>
-              <div class="secondary">Applies to every zone</div>
+              <div class="secondary wrap">Sets manual preset on every zone</div>
             </div>
             <div class="stepper">
               <button data-act="runtime" data-delta="-5" title="Less">
@@ -1650,20 +1231,53 @@
               <button data-act="runtime" data-delta="5" title="More">
                 <ha-icon icon="${ICON.plus}"></ha-icon></button>
             </div>
-          </div>
-        </div>`;
+          </div>`;
     }
 
-    _drawerBtn(hint, open, label) {
-      return `
-        <button class="drawer-btn${open ? ' open' : ''}" data-act="drawer">
-          <ha-icon icon="${ICON.tune}"></ha-icon>
-          <span class="label">
-            <b>${open ? 'Hide' : 'Show'} ${label || 'programs &amp; settings'}</b>
-            ${hint ? `<span>${esc(hint)}</span>` : ''}
-          </span>
-          <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
-        </button>`;
+    _renderFlood() {
+      const c    = this._config;
+      const st   = this._st(c.entity);
+      const wet  = !!st && st.state === 'on';
+      const sib  = siblingsOf(c.entity).map(e => e.entity_id);
+      const pick = (suffix, domain) =>
+        pickSibling(sib.filter(id => matches(id, domain, suffix)), c.entity);
+
+      const temp   = c.temperature_entity || pick('_temperature', 'sensor');
+      const signal = c.signal_entity      || pick('_signal_strength', 'sensor');
+      const batt   = c.battery_entity     || pick('_battery_level', 'sensor')
+                                          || pick('_battery', 'sensor');
+
+      const name = c.name || (st && st.attributes.friendly_name) || objectId(c.entity);
+      const when = st ? fmtTime(new Date(st.last_changed)) : '';
+      const secondary = wet ? 'Water detected · ' + when : 'Dry';
+
+      const chips = [];
+      const t = num(this._st(temp) && this._st(temp).state);
+      if (t != null) {
+        const unit = this._attr(temp, 'unit_of_measurement', '°F');
+        chips.push(chipHtml(ICON.thermo, Math.round(t) + ' ' + unit, RGB.grey, false));
+      }
+      const sig = num(this._st(signal) && this._st(signal).state);
+      if (sig != null) chips.push(chipHtml(ICON.wifi, sig + ' dBm', RGB.grey, false));
+      const b = num(this._st(batt) && this._st(batt).state);
+      if (b != null) {
+        const low = b <= 20;
+        chips.push(chipHtml(batteryIcon(b), Math.round(b) + '%',
+                            low ? RGB.orange : RGB.green, low));
+      }
+
+      this.shadowRoot.innerHTML = `
+        <style>${BASE_STYLES}${CARD_STYLES}</style>
+        <ha-card class="${wet ? 'accent-red' : ''}">
+          <div class="row">
+            ${shapeHtml(ICON.flood, wet ? RGB.red : RGB.accent, 'lg')}
+            <div class="grow">
+              <div class="primary">${esc(name)}</div>
+              <div class="secondary"${wet ? ` style="color: rgb(${RGB.red});"` : ''}>${esc(secondary)}</div>
+            </div>
+          </div>
+          <div class="chips">${chips.join('')}</div>
+        </ha-card>`;
     }
 
     // Writes the preset to every zone on the controller, in MINUTES (the
@@ -1681,14 +1295,14 @@
       this._toast = null;
       this._render();
 
-      console.debug('[bhyve-controller-card] set_manual_preset_runtime',
+      console.debug('[bhyve-card] set_manual_preset_runtime',
                     { entity_id: zones, minutes: next });
 
       const failed = reason => {
         this._presetLocal = true;
         this._toast = 'Device didn\u2019t accept this — using ' + next +
                       ' min as a local default only.';
-        console.debug('[bhyve-controller-card] preset rejected, keeping local default',
+        console.debug('[bhyve-card] preset rejected, keeping local default',
                       { minutes: next, reason: reason });
         this._render();
       };
@@ -1718,7 +1332,11 @@
           else if (act === 'stop')   this._stopZone(el.dataset.entity);
           else if (act === 'toggle') this._toggle(el.dataset.entity);
           else if (act === 'rain')   this._setRainDelay(dev.rainDelay, this._config.rain_delay_hours);
-          else if (act === 'drawer') { this._expanded = !this._expanded; this._render(); }
+          else if (act === 'section') {
+            const id = el.dataset.section;
+            this._open[id] = !this._open[id];
+            this._render();
+          }
           else if (act === 'runtime') this._setRuntime(zones, parseInt(el.dataset.delta, 10));
           else if (act === 'mode' && dev.mode) {
             this._svc('select', 'select_option',
@@ -1732,19 +1350,12 @@
   // ---------------------------------------------------------------------------
   // Config editors
   // ---------------------------------------------------------------------------
-  // `show_programs` hides different things on each card, so the controller
-  // spells out what its own drawer contains.
-  const CONTROLLER_LABELS = {
-    show_programs: 'Show programs & settings',
-  };
-
   const LABELS = {
     title:        'Title (defaults to the device name)',
     device_id:    'B-hyve device',
-    show_actions: 'Show Run/Stop buttons and the settings drawer',
-    show_smart_watering_and_programs: 'Show smart watering and programs',
-    entity:       'Zone valve (or flood sensor)',
-    name:         'Name override',
+    entity:       'Flood sensor (leave empty for a controller)',
+    show_actions: 'Show Run/Stop, rain delay and run time',
+    show_programs: 'Show the programs section',
     run_time:     'Run time (minutes)',
   };
 
@@ -1806,54 +1417,38 @@
     _hint() { return ''; }
   }
 
-  class BhyveControllerCardEditor extends BhyveEditorBase {
-    // Deliberately free of `this` — ha-form calls computeLabel unbound.
-    _computeLabel(schema) {
-      return CONTROLLER_LABELS[schema.name] || LABELS[schema.name] || schema.name;
-    }
+  class BhyveCardEditor extends BhyveEditorBase {
     _schema() {
       return [
         { name: 'title',         selector: { text: {} } },
         { name: 'device_id',     selector: { device: { integration: 'bhyve' } } },
+        { name: 'run_time',      selector: { number: { min: 1, max: 60, mode: 'box',
+                                                       unit_of_measurement: 'min' } } },
         { name: 'show_actions',  selector: { boolean: {} } },
         { name: 'show_programs', selector: { boolean: {} } },
       ];
     }
     _hint() {
-      return 'Leave the device empty to use the first B-hyve controller found. ' +
-             'Entity overrides (<code>device_mode_entity</code>, <code>rain_delay_entity</code>, ' +
+      return 'Leave the device empty to use the first B-hyve controller found, ' +
+             'or set <code>entity</code> to a flood sensor. Entity overrides ' +
+             '(<code>device_mode_entity</code>, <code>rain_delay_entity</code>, ' +
              '<code>hub_entity</code>, <code>signal_entity</code>, ' +
-             '<code>weekly_volume_entity</code>, <code>zones</code>) are YAML-only for now.';
-    }
-  }
-
-  class BhyveZoneCardEditor extends BhyveEditorBase {
-    _schema() {
-      return [
-        { name: 'entity', required: true,
-          selector: { entity: { domain: ['valve', 'binary_sensor'] } } },
-        { name: 'name',     selector: { text: {} } },
-        { name: 'run_time', selector: { number: { min: 1, max: 60, mode: 'box',
-                                                  unit_of_measurement: 'min' } } },
-        { name: 'show_smart_watering_and_programs', selector: { boolean: {} } },
-      ];
-    }
-    _hint() {
-      return 'Everything else is auto-discovered from the zone\'s device. ' +
-             'Overrides (<code>hub_entity</code>, <code>battery_entity</code>, ' +
-             '<code>history_entity</code>, <code>program_entities</code>, ' +
-             '<code>smart_watering_entity</code>, <code>rain_delay_entity</code>, ' +
-             '<code>weekly_volume_entity</code>) are YAML-only for now.';
+             '<code>weekly_volume_entity</code>, <code>zones</code>) are ' +
+             'YAML-only for now.';
     }
   }
 
   // ---------------------------------------------------------------------------
   // Register
   // ---------------------------------------------------------------------------
-  if (!customElements.get(CONTROLLER))    customElements.define(CONTROLLER,    BhyveControllerCard);
-  if (!customElements.get(ZONE))          customElements.define(ZONE,          BhyveZoneCard);
-  if (!customElements.get(CONTROLLER_ED)) customElements.define(CONTROLLER_ED, BhyveControllerCardEditor);
-  if (!customElements.get(ZONE_ED))       customElements.define(ZONE_ED,       BhyveZoneCardEditor);
+  if (!customElements.get(CARD))    customElements.define(CARD,    BhyveCard);
+  if (!customElements.get(CARD_ED)) customElements.define(CARD_ED, BhyveCardEditor);
+  // Same card under the v4 name. A custom element cannot be registered twice,
+  // so the alias is a bare subclass. It is deliberately absent from
+  // window.customCards: the picker offers one card, not two.
+  if (!customElements.get(LEGACY_CARD)) {
+    customElements.define(LEGACY_CARD, class extends BhyveCard {});
+  }
 
   window.customCards = window.customCards || [];
   const register = (type, name, description) => {
@@ -1864,10 +1459,9 @@
       });
     }
   };
-  register(CONTROLLER, 'B-hyve Controller Card',
-    'Device overview: zone rows, status, programs and shared settings.');
-  register(ZONE, 'B-hyve Zone Card',
-    'Full detail for one B-hyve zone or flood sensor.');
+  register(CARD, 'B-hyve Card',
+    'One per B-hyve device: zone rows, status, programs and settings. ' +
+    'Also renders B-hyve flood sensors.');
 
   console.info(
     '%c BHYVE-CARDS %c v' + CARD_VERSION + ' ',

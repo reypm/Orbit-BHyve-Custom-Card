@@ -1,9 +1,9 @@
 # Design decisions
 
-The authoritative source for how these cards look and behave is the Claude Design
+The authoritative source for how these cards look and behave is the design-system
 project **"BHyve Card Family"** (project `9c531b4e-77f8-4416-b3d0-450f12192eff`). The
-zone card follows `BHyve Card Family v4.dc.html`; the controller card follows the v5b
-states in `BHyve Card Family v5.dc.html`.
+single `bhyve-card` follows the **v5b** states in `BHyve Card Family v5.dc.html`. The
+v5a alternative in the same file was not selected and must not be shipped.
 
 Several details in that design differ from the plain-language spec the v3 work was
 briefed with. The design won in every case. This file records each one so a later
@@ -66,6 +66,60 @@ battery *level* and nothing else; there is no charging state to report, so the s
 ships as just "Controller" rather than asserting something no entity backs. Likewise the
 Hub sub-line's "· −58 dBm" half is appended only when a signal-strength entity actually
 resolves, and omitted cleanly when none does.
+
+---
+
+## v5.0.0 — the two card types become one
+
+v5 collapses `bhyve-controller-card` and `bhyve-zone-card` into a single `bhyve-card`, and
+adopts the v5b states of `BHyve Card Family v5.dc.html` in full: two accordions below the
+zone rows instead of one combined drawer.
+
+**Rule reminder: v5a is not shipped.** The same design file carries a v5a alternative — the
+regrouped top-level chip row — which was not selected. Do not implement it, and do not ship
+both; putting the same four facts on screen twice is the thing v5 exists to stop.
+
+| # | Item | The obvious move | The design specifies | Shipped |
+|---|---|---|---|---|
+| 14 | **One drawer or two** | Keep the single "Programs & settings" drawer and add Status to it | **Two accordions**, stacked, each with its own chevron and independent open state: `Settings & configuration` (tune) holding Status, rain delay and run time; `Programs · all zones` (calendar_month) holding the merged list. The split follows the read-only/actionable seam, and fixes the thing that made one drawer awkward — opening it to nudge run time meant scrolling past every program | `_open = { settings, programs }`, both closed by default |
+| 15 | **The old label** | Keep "Programs & settings" on one of them | **Retired in v5b.** The two rows read "Show settings & configuration" and "Show programs · all zones" | Asserted absent in test group 6 |
+| 16 | **Section sub-lines** | Repeat the label | **Carry what is inside without opening it:** `Status · rain delay · run time` and `N enabled · M disabled` | Both computed from what actually rendered |
+| 17 | **Disabled programs** | Reuse the v4 zone card's collapsible "N disabled programs" fold | **A subsection, not a fold** — a 11.5px uppercase count label with a hairline to the right edge, off rows below it, names in `--sec`, switches live. The zone card's fold existed because a single-selection list of 8 is 7 rows of noise; this drawer is where you go to configure programs, so a second tap inside a section you already opened is one fold too many | `.sub-head`, `.row.prog-off` |
+| 18 | **Run time sub-line** | Leave v4's "Applies to every zone" | **"Sets manual preset on every zone"** — it names the thing being written, not just its scope | Shipped verbatim |
+
+### Inferences the design file does not cover
+
+The design file still shows the v3/v4 family — controller card, zone cards, flood cards —
+so it does not describe a merged card. These calls were made to implement the merge
+without losing anything the design does show. Each is the smallest move consistent with
+the rest of the system.
+
+- **Flood sensors stay.** The design file carries flood-sensor states, and only the zone
+  card could render them. Deleting the zone card outright would have silently dropped
+  support for a device the design still documents. A flood sensor is its own B-hyve device
+  with none of a controller's parts, so the one card renders the flood layout when its
+  `entity` points at one — the same layout, moved across intact. Precedent: the v4 zone
+  card already switched layouts on the same test.
+- **`bhyve-controller-card` is kept as an alias.** A custom element cannot be defined
+  twice, so it is a bare subclass of `BhyveCard`. Without it, upgrading through HACS would
+  blank every dashboard using the v4 name. It is deliberately absent from
+  `window.customCards`: the picker offers one card, not two.
+- **`bhyve-zone-card` is not aliased.** Its config shape is incompatible — `entity:
+  valve.x` names one zone, and mapping that onto the merged card would render N identical
+  full controller cards on a dashboard that used to show N zones. A missing custom element
+  is a clearer signal than a wrong render, and the README documents the migration.
+- **A weather-adjusted program prints no schedule.** The design's smart row reads
+  "Weather adjusted · soil 61%" — no start time, no duration. v4 appended both from the
+  program's attributes. A smart program picks its own, so printing them states a schedule
+  the device does not follow; `programSummary` now returns weather-adjusted plus the soil
+  reading when one is available, and nothing else.
+- **`history_entity` and `smart_watering_entity` are dropped, not accepted-and-ignored.**
+  Nothing on the merged card renders per-zone run history or per-zone smart watering, so
+  keeping the keys would be dead config that looks live. Every other override key survives.
+- **Drawer sub-lines wrap rather than ellipse.** "Earliest across all zones · Front Lawn"
+  and "Sets manual preset on every zone" both carry the half of the sentence that makes the
+  row mean something, and neither fits one 380px line beside a value or a stepper.
+  Established in v4.1.0 for the Status rows; extended here to rain delay and run time.
 
 ---
 
