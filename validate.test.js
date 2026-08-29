@@ -260,7 +260,7 @@ async function main() {
   assert(window.customCards.length === 2, 'two customCards entries');
   assert(window.customCards.every(c => c.preview === true), 'both marked preview');
   // Keep the shipped version in step with the release tag.
-  const EXPECTED_VERSION = '4.0.0';
+  const EXPECTED_VERSION = '4.1.0';
   assert(code.indexOf("CARD_VERSION   = '" + EXPECTED_VERSION + "'") !== -1,
          'version constant is ' + EXPECTED_VERSION);
 
@@ -944,7 +944,8 @@ async function main() {
   assert(offHtml2.indexOf('data-act="mode"') !== -1, 'Auto/Off control unaffected');
   assert(offHtml2.indexOf('data-act="run"') !== -1, 'zone Run buttons unaffected');
   assert((offHtml2.match(/class="zone-row"/g) || []).length === 4, 'zone rows unaffected');
-  assert(offHtml2.indexOf('class="chips"') !== -1, 'summary chips unaffected');
+  assert(offHtml2.indexOf('class="hub-dot"') !== -1,
+    'hub dot survives the drawer being hidden entirely');
 
   // Expanding it while hidden must not resurrect it.
   drawerOff._expanded = true; drawerOff._render();
@@ -1068,6 +1069,181 @@ async function main() {
          'the retired v3 key is not resurrected alongside it');
   // Naming convention: every boolean option is show_*, positive, default true.
   assert(code.indexOf('hide_') === -1, 'no negative-polarity option was introduced');
+
+
+  group('29. v5b controller — hub dot and the Status section');
+
+  // Section body: everything between the Status heading and the divider that
+  // separates read-only rows from the controls below.
+  const statusBody = h => {
+    const m = /<b>Status · all zones<\/b>([\s\S]*?)<div class="hr">/.exec(h);
+    return m ? m[1] : '';
+  };
+  const statRows = h => {
+    const out = [];
+    const re = /<div class="primary">([^<]*)<\/div>\s*<div class="secondary[^"]*">([^<]*)<\/div>\s*<\/div>\s*<span class="stat-val">([^<]*)<\/span>/g;
+    let m;
+    while ((m = re.exec(h))) out.push({ title: m[1], note: m[2], value: m[3] });
+    return out;
+  };
+  const openDrawer = card => {
+    card.shadowRoot.querySelectorAll('[data-act]')
+      .find(el => el.dataset.act === 'drawer').click();
+    return body(card.shadowRoot.innerHTML);
+  };
+
+  // ── the top-level chip row is gone ─────────────────────────────────────
+  const v5 = await mountController({});
+  let v5html = body(v5.shadowRoot.innerHTML);
+  assert(v5html.indexOf('class="chips"') === -1, 'controller has no summary chip row');
+  assert(chipLabels(v5html).length === 0, 'no chip renders anywhere on the collapsed card');
+  assert(/<\/div>\s*<button class="drawer-btn/.test(v5html),
+    'zone rows run straight into the drawer toggle');
+
+  // ── hub dot ────────────────────────────────────────────────────────────
+  assert((v5html.match(/class="hub-dot/g) || []).length === 1, 'exactly one hub dot');
+  assert(/<div class="icon-wrap">\s*<div class="shape lg"[\s\S]*?<\/div>\s*<span class="hub-dot/
+    .test(v5html), 'the dot is overlaid on the header shape icon');
+  assert(v5html.indexOf('Hub online') !== -1, 'online dot is labelled for screen readers');
+  const v5raw = v5.shadowRoot.innerHTML;
+  assert(/\.hub-dot \{[\s\S]*?background: rgb\(var\(--mush-rgb-green/.test(v5raw),
+    'online dot is green');
+  assert(/\.hub-dot\.off \{ background: rgb\(var\(--mush-rgb-red/.test(v5raw),
+    'offline dot is red');
+  assert(/\.hub-dot \{[\s\S]*?width: 12px; height: 12px/.test(v5raw), 'dot is 12px');
+  assert(/\.hub-dot \{[\s\S]*?right: -1px; bottom: -1px/.test(v5raw),
+    'dot sits bottom-right of the icon');
+  assert(/box-shadow: 0 0 0 2px var\(--ha-card-background/.test(v5raw),
+    'dot is ringed 2px in the card background, so it survives a dark theme');
+
+  // Present in both drawer states — that is the whole "always visible" rule.
+  const v5open = openDrawer(v5);
+  assert((v5open.match(/class="hub-dot/g) || []).length === 1,
+    'dot still rendered with the drawer expanded');
+
+  const offlineStates = baseStates();
+  offlineStates['binary_sensor.front_lawn_connected'] = st('off');
+  const hubOff = await mountController({}, makeHass({ states: offlineStates }));
+  let hubOffHtml = body(hubOff.shadowRoot.innerHTML);
+  assert(hubOffHtml.indexOf('class="hub-dot off"') !== -1, 'offline adds the .off modifier');
+  assert(hubOffHtml.indexOf('Hub offline') !== -1, 'offline dot is labelled offline');
+  assert(body(openDrawer(hubOff)).indexOf('class="hub-dot off"') !== -1,
+    'offline dot survives expanding the drawer');
+
+  // ── Status · all zones ─────────────────────────────────────────────────
+  const stat = await mountController({});
+  let statHtml = openDrawer(stat);
+  assert(statHtml.indexOf('Status · all zones') !== -1, 'drawer has the Status section');
+  assert(statHtml.indexOf('Status · all zones') < statHtml.indexOf('Programs · all zones'),
+    'Status comes before Programs');
+  assert(statHtml.indexOf('Programs · all zones') < statHtml.indexOf('Rain delay'),
+    'Programs still comes before Rain delay');
+  assert(statHtml.indexOf('Rain delay') < statHtml.indexOf('Run time'),
+    'Rain delay still comes before Run time');
+  assert(statHtml.indexOf('Read-only. One row per device-level fact') !== -1,
+    'section sub-line says it is read-only');
+
+  let rows = statRows(statusBody(statHtml));
+  assert(rows.length === 3, 'three rows when no weekly-volume helper is configured');
+  assert(rows[0].title === 'Hub', 'row 1 is Hub');
+  assert(rows[0].value === 'Online', 'Hub value reads Online');
+  assert(rows[0].note === 'Wi-Fi bridge',
+    'signal strength omitted, not faked, when no sensor resolves');
+  assert(rows[1].title === 'Battery', 'row 2 is Battery');
+  assert(rows[1].value === '85%', 'battery value is the device battery percentage');
+  assert(rows[1].note === 'Controller', 'battery sub-line claims no charging state');
+  assert(rows[2].title === 'Next run', 'row 3 is Next run');
+  assert(rows[2].note === 'Earliest across all zones · Front Lawn',
+    'next run names the earliest zone');
+  assert(/^(Today|Tomorrow|\w{3}) \d/.test(rows[2].value), 'next run value is a time');
+
+  // Read-only means no control in the section, not a switch styled to look inert.
+  const sBody = statusBody(statHtml);
+  assert(sBody.indexOf('class="sw') === -1, 'no toggle switch on any status row');
+  assert(sBody.indexOf('data-act') === -1, 'no status row is interactive');
+  assert(sBody.indexOf('<button') === -1, 'no button in the section');
+  assert((sBody.match(/class="stat-val"/g) || []).length === 3,
+    'every status row carries a right-aligned value instead');
+  assert(/\.stat-val \{[\s\S]*?font-variant-numeric: tabular-nums/.test(stat.shadowRoot.innerHTML),
+    'values use tabular numerals');
+
+  // Hub is the one row that carries colour, on its icon rather than its value.
+  assert(sBody.indexOf('mdi:wifi"') !== -1, 'Hub row uses the wifi icon');
+  assert(sBody.indexOf('mdi:clock-outline') !== -1, 'Next run uses a clock icon');
+  const offRows = statRows(statusBody(body(hubOff.shadowRoot.innerHTML)));
+  assert(offRows[0].value === 'Offline', 'Hub value flips to Offline');
+  assert(/^Not reachable · last seen /.test(offRows[0].note),
+    'offline sub-line says when it was last seen');
+  assert(statusBody(body(hubOff.shadowRoot.innerHTML)).indexOf('mdi:wifi-off') !== -1,
+    'offline Hub row uses the wifi-off icon');
+
+  // Signal strength appears when an entity actually resolves.
+  const sigStates = Object.assign(baseStates(), { 'sensor.hub_rssi': st('-58') });
+  const withSig = await mountController({ signal_entity: 'sensor.hub_rssi' },
+    makeHass({ states: sigStates }));
+  assert(statRows(statusBody(openDrawer(withSig)))[0].note === 'Wi-Fi bridge · -58 dBm',
+    'signal strength is appended when it resolves');
+
+  // ── drawer summary text ────────────────────────────────────────────────
+  const hintOf = h => {
+    const m = /class="drawer-btn[^"]*"[\s\S]*?<span>([^<]*)<\/span>/.exec(h);
+    return m ? m[1] : '';
+  };
+  assert(hintOf(body(v5.shadowRoot.innerHTML)) === 'Status · 3 programs · rain delay · run time',
+    'collapsed summary text names the Status section first');
+
+  // ── weekly volume aggregation ──────────────────────────────────────────
+  const weekRow = card => statRows(statusBody(openDrawer(card))).find(r => r.title === 'This week');
+
+  const oneHelper = await mountController({ weekly_volume_entity: 'sensor.week' },
+    makeHass({ states: Object.assign(baseStates(), { 'sensor.week': st('48.6') }) }));
+  let w = weekRow(oneHelper);
+  assert(!!w, 'a configured helper adds the This week row');
+  assert(w.value === '48.6 gal', 'single helper is used as-is');
+  assert(w.note === 'All zones combined',
+    'one device-level helper is a whole-controller total by definition');
+
+  const partial = await mountController(
+    { weekly_volume_entity: ['sensor.w1', 'sensor.w2'] },
+    makeHass({ states: Object.assign(baseStates(),
+      { 'sensor.w1': st('10'), 'sensor.w2': st('5.5') }) }));
+  w = weekRow(partial);
+  assert(w.value === '15.5 gal', 'a list is summed, not overwritten');
+  assert(w.note === '2 of 4 zones',
+    'a list covering fewer helpers than zones is labelled a partial total');
+
+  const complete = await mountController(
+    { weekly_volume_entity: ['sensor.w1', 'sensor.w2', 'sensor.w3', 'sensor.w4'] },
+    makeHass({ states: Object.assign(baseStates(), { 'sensor.w1': st('10'),
+      'sensor.w2': st('5.5'), 'sensor.w3': st('4'), 'sensor.w4': st('0.5') }) }));
+  w = weekRow(complete);
+  assert(w.value === '20.0 gal', 'four helpers sum');
+  assert(w.note === 'All zones combined', 'a list covering every zone is not called partial');
+
+  const someUnavailable = await mountController(
+    { weekly_volume_entity: ['sensor.w1', 'sensor.w2', 'sensor.w3'] },
+    makeHass({ states: Object.assign(baseStates(),
+      { 'sensor.w1': st('10'), 'sensor.w2': st('unavailable'), 'sensor.w3': st('2') }) }));
+  w = weekRow(someUnavailable);
+  assert(w.value === '12.0 gal', 'unavailable helpers are skipped, not counted as zero');
+  assert(w.note === '2 of 4 zones', 'the partial count reflects what actually reported');
+
+  const metric = await mountController({ weekly_volume_entity: 'sensor.week' },
+    makeHass({ states: Object.assign(baseStates(),
+      { 'sensor.week': st('184', { unit_of_measurement: 'L' }) }) }));
+  assert(weekRow(metric).value === '184.0 L', 'the helper unit is honoured');
+
+  const zeroWeekCtrl = await mountController({ weekly_volume_entity: 'sensor.week' },
+    makeHass({ states: Object.assign(baseStates(), { 'sensor.week': st('0') }) }));
+  assert(!weekRow(zeroWeekCtrl), 'a zero total renders no row, as the chip never did');
+  assert(!weekRow(await mountController({})), 'no row when nothing is configured');
+
+  // ── v4 zone card is untouched ──────────────────────────────────────────
+  const v4zone = await mountZone({ entity: 'valve.front_lawn' });
+  const v4html = body(v4zone.shadowRoot.innerHTML);
+  assert(v4html.indexOf('class="chips"') !== -1, 'the zone card keeps its chip row');
+  assert(v4html.indexOf('hub-dot') === -1, 'the hub dot is controller-only');
+  assert(v4html.indexOf('stat-val') === -1, 'status rows are controller-only');
 
   // ── Summary ──────────────────────────────────────────────────────────────
   process.stdout.write('\n-----------------------------------------\n');

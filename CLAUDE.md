@@ -19,7 +19,7 @@ v3.0.0 replaced the single all-in-one `bhyve-sprinkler-card` (see the `v2.0.0` t
 
 | Element | Purpose |
 |---|---|
-| `bhyve-controller-card` | One per B-hyve device: status, Auto/Off, zone rows, settings drawer |
+| `bhyve-controller-card` | One per B-hyve device: status, Auto/Off, hub dot, zone rows, settings drawer |
 | `bhyve-zone-card` | One per zone: four states, fixed chip row, inline rows. Also renders flood sensors |
 | `bhyve-controller-card-editor` | `ha-form` editor for the controller card |
 | `bhyve-zone-card-editor` | `ha-form` editor for the zone card |
@@ -56,10 +56,11 @@ node validate.test.js
 `validate.test.js` is headless: it stubs browser globals, `eval`s the card file, then
 mounts both cards against a fake device/entity registry. The DOM stub parses rendered
 tags, so tests dispatch real clicks at handles and exercise the actual event handlers.
-200 assertions across 27 groups cover the zone card's four states, chip order and each
+370 assertions across 29 groups cover the zone card's four states, chip order and each
 chip's visibility rule, the drawer toggle, the run-time stepper's fallback, the merged
 programs list with per-zone run times, station-order zone sorting, the device-Off state,
-omitted quick-action buttons, service-call payloads, flood sensors, the empty state, and
+omitted quick-action buttons, service-call payloads, flood sensors, the empty state, the
+controller's hub dot and read-only Status section with its weekly-volume aggregation, and
 XSS escaping.
 
 **Run the test suite before opening a PR. Add assertions for any logic you change.**
@@ -69,8 +70,21 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
 
 ## Key implementation notes
 
-- **Design source of truth:** the "BHyve Card Family v3" Claude Design project. The chip
-  order, the four zone states, copy strings and colour treatments come from there.
+- **Design source of truth:** the "BHyve Card Family" Claude Design project. The chip
+  order, the four zone states, copy strings and colour treatments come from there. The
+  zone card tracks the v4 states; the controller card tracks **v5b** — the alternative
+  labelled v5a in the same file was rejected and must not be shipped alongside it.
+- **The controller card has no summary chip row.** Hub, battery, next run and weekly
+  volume are read-only rows in the drawer's `Status · all zones` section, which sits above
+  `Programs · all zones` and is separated from it by a divider: read-only first, then
+  everything you can act on. The rows carry a right-aligned `.stat-val` and never a
+  switch — an empty right column reads as controls that failed to load. Hub status is the
+  one fact that stays visible with the drawer closed, as a 12 px `.hub-dot` on the header
+  shape icon. Do not add a second dot for any other stat.
+- **`weekly_volume_entity` on the controller card takes a string or a list.** A string is
+  one device-level helper and is labelled "All zones combined". A list is summed, skipping
+  helpers that do not report, and is labelled `N of M zones` when it covers fewer than the
+  card's zones — a partial total must never present itself as the whole.
 - **`manual_preset_runtime` is in SECONDS.** The integration's source field is
   `manual_preset_runtime_sec` and it divides by 60 itself before watering, but both
   `bhyve.start_watering` and `bhyve.set_manual_preset_runtime` take MINUTES. Every read
