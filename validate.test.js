@@ -627,7 +627,11 @@ async function main() {
   const readOnly = await mountController({ show_actions: false });
   html = readOnly.shadowRoot.innerHTML;
   assert(html.indexOf('data-act="run"') === -1, 'no Run buttons when show_actions is false');
-  assert(html.indexOf('data-act="drawer"') === -1, 'no drawer when show_actions is false');
+  assert(html.indexOf('data-act="runtime"') === -1, 'no run-time stepper either');
+  assert(html.indexOf('data-act="drawer"') !== -1,
+    'the drawer toggle stays — it is the way to the read-only Status section');
+  assert(html.indexOf('Show status') !== -1,
+    'and offers status, not settings it no longer has');
   assert(html.indexOf('data-act="mode"') !== -1, 'mode control stays — it is authoritative');
 
   group('21. XSS escaping');
@@ -929,8 +933,10 @@ async function main() {
   const drawerOff = await mountController({ show_programs: false });
   const offHtml2 = drawerOff.shadowRoot.innerHTML;
   // The whole drawer goes, its own show/hide row included.
-  assert(offHtml2.indexOf('data-act="drawer"') === -1, 'toggle row omitted when false');
+  assert(offHtml2.indexOf('data-act="drawer"') !== -1,
+    'toggle row stays — it still reaches Status');
   assert(offHtml2.indexOf('programs &amp; settings') === -1, 'show/hide copy gone');
+  assert(offHtml2.indexOf('Show status') !== -1, 'replaced by copy naming what is left');
   assert(offHtml2.indexOf('class="drawer"') === -1, 'drawer body omitted');
   assert(offHtml2.indexOf('Programs · all zones') === -1, 'merged programs list omitted');
   assert(offHtml2.indexOf('Rain delay') === -1, 'rain delay row omitted');
@@ -947,15 +953,19 @@ async function main() {
   assert(offHtml2.indexOf('class="hub-dot"') !== -1,
     'hub dot survives the drawer being hidden entirely');
 
-  // Expanding it while hidden must not resurrect it.
+  // Expanding it must not resurrect the programs list — only Status is inside.
   drawerOff._expanded = true; drawerOff._render();
-  assert(drawerOff.shadowRoot.innerHTML.indexOf('class="drawer"') === -1,
-         'stays omitted even if _expanded is set');
+  const openOff = drawerOff.shadowRoot.innerHTML;
+  assert(openOff.indexOf('Programs · all zones') === -1,
+         'programs stay omitted even if _expanded is set');
+  assert(openOff.indexOf('data-act="runtime"') === -1, 'so does the stepper');
+  assert(openOff.indexOf('Status · all zones') !== -1,
+         'Status is what the expanded drawer holds instead');
 
-  // Interaction with the pre-existing show_actions, which also hides the drawer.
+  // Interaction with the pre-existing show_actions, which hides the same block.
   const noActions = await mountController({ show_actions: false });
-  assert(noActions.shadowRoot.innerHTML.indexOf('data-act="drawer"') === -1,
-         'show_actions false still hides the drawer, as before');
+  assert(noActions.shadowRoot.innerHTML.indexOf('data-act="drawer"') !== -1,
+         'show_actions false keeps the toggle, for Status');
   const bothOn = await mountController({ show_actions: true, show_programs: true });
   assert(bothOn.shadowRoot.innerHTML.indexOf('data-act="drawer"') !== -1,
          'drawer returns when both are true');
@@ -1076,7 +1086,9 @@ async function main() {
   // Section body: everything between the Status heading and the divider that
   // separates read-only rows from the controls below.
   const statusBody = h => {
-    const m = /<b>Status · all zones<\/b>([\s\S]*?)<div class="hr">/.exec(h);
+    // With the controls hidden there is no divider after the section, so the
+    // capture also has to be able to run to the end of the card.
+    const m = /<b>Status · all zones<\/b>([\s\S]*?)(?:<div class="hr">|$)/.exec(h);
     return m ? m[1] : '';
   };
   const statRows = h => {
@@ -1244,6 +1256,111 @@ async function main() {
   assert(v4html.indexOf('class="chips"') !== -1, 'the zone card keeps its chip row');
   assert(v4html.indexOf('hub-dot') === -1, 'the hub dot is controller-only');
   assert(v4html.indexOf('stat-val') === -1, 'status rows are controller-only');
+
+  group('30. Status is not gated by show_actions or show_programs');
+
+  // Four rows, so a missing one is a visible failure rather than a silent
+  // shortening of the list.
+  const WEEK4 = ['sensor.w1', 'sensor.w2', 'sensor.w3', 'sensor.w4'];
+  const week4Hass = () => makeHass({ states: Object.assign(baseStates(),
+    { 'sensor.w1': st('21.4'), 'sensor.w2': st('16.8'),
+      'sensor.w3': st('7.2'),  'sensor.w4': st('3.2') }) });
+  const fourRows = (card, label) => {
+    const h = openDrawer(card);
+    assert(h.indexOf('Status · all zones') !== -1, label + ': section present');
+    const r = statRows(statusBody(h));
+    assert(r.length === 4, label + ': all four rows render');
+    assert(r.map(x => x.title).join(',') === 'Hub,Battery,Next run,This week',
+      label + ': rows in the design order');
+    assert(r[0].value === 'Online', label + ': Hub value intact');
+    assert(r[1].value === '85%', label + ': Battery value intact');
+    assert(/^(Today|Tomorrow|\w{3}) \d/.test(r[2].value), label + ': Next run value intact');
+    assert(r[3].value === '48.6 gal', label + ': This week total intact');
+    assert(r[3].note === 'All zones combined', label + ': aggregation note intact');
+    assert(statusBody(h).indexOf('class="sw') === -1, label + ': still read-only');
+    return h;
+  };
+
+  // ── show_actions: false ────────────────────────────────────────────────
+  const noActs = await mountController(
+    { show_actions: false, weekly_volume_entity: WEEK4 }, week4Hass());
+  let naCollapsed = noActs.shadowRoot.innerHTML;
+  assert(naCollapsed.indexOf('data-act="drawer"') !== -1,
+    'show_actions false: the toggle is still there to reach Status');
+  assert(naCollapsed.indexOf('class="hub-dot"') !== -1,
+    'show_actions false: hub dot unaffected');
+  let naOpen = fourRows(noActs, 'show_actions false');
+  // What show_actions is actually for is still gone.
+  assert(naOpen.indexOf('data-act="run"') === -1, 'show_actions false: no Run buttons');
+  assert(naOpen.indexOf('data-act="stop"') === -1, 'show_actions false: no Stop buttons');
+  assert(naOpen.indexOf('data-act="runtime"') === -1, 'show_actions false: no run-time stepper');
+  assert(naOpen.indexOf('Programs · all zones') === -1, 'show_actions false: no programs list');
+  assert(naOpen.indexOf('data-act="mode"') !== -1, 'show_actions false: Auto/Off still stays');
+  assert(naOpen.indexOf('class="hub-dot"') !== -1,
+    'show_actions false: hub dot survives expanding too');
+
+  // ── show_programs: false ───────────────────────────────────────────────
+  const noProgs = await mountController(
+    { show_programs: false, weekly_volume_entity: WEEK4 }, week4Hass());
+  let npCollapsed = noProgs.shadowRoot.innerHTML;
+  assert(npCollapsed.indexOf('data-act="drawer"') !== -1,
+    'show_programs false: the toggle is still there to reach Status');
+  assert(npCollapsed.indexOf('class="hub-dot"') !== -1,
+    'show_programs false: hub dot unaffected');
+  let npOpen = fourRows(noProgs, 'show_programs false');
+  assert(npOpen.indexOf('Programs · all zones') === -1, 'show_programs false: no programs list');
+  assert(npOpen.indexOf('data-act="toggle"') === -1, 'show_programs false: no program switches');
+  assert(npOpen.indexOf('Rain delay') === -1, 'show_programs false: no rain delay row');
+  assert(npOpen.indexOf('data-act="runtime"') === -1, 'show_programs false: no run-time stepper');
+  // What show_programs never claimed to touch is still there.
+  assert(npOpen.indexOf('data-act="run"') !== -1, 'show_programs false: Run buttons unaffected');
+  assert(npOpen.indexOf('data-act="mode"') !== -1, 'show_programs false: Auto/Off unaffected');
+
+  // ── both false ─────────────────────────────────────────────────────────
+  const neither = await mountController(
+    { show_actions: false, show_programs: false, weekly_volume_entity: WEEK4 }, week4Hass());
+  const bothOpen = fourRows(neither, 'both false');
+  assert(bothOpen.indexOf('data-act="run"') === -1, 'both false: no Run buttons');
+  assert(bothOpen.indexOf('Programs · all zones') === -1, 'both false: no programs list');
+  assert(neither.shadowRoot.innerHTML.indexOf('class="hub-dot"') !== -1,
+    'both false: hub dot unaffected');
+
+  // ── the toggle still toggles, and still starts closed ──────────────────
+  const gesture = await mountController(
+    { show_programs: false, weekly_volume_entity: WEEK4 }, week4Hass());
+  assert(gesture._expanded === false, 'still collapsed by default — the card stays compact');
+  assert(gesture.shadowRoot.innerHTML.indexOf('Status · all zones') === -1,
+    'Status is behind the toggle, not always on screen');
+  assert(gesture.shadowRoot.innerHTML.indexOf('Show status') !== -1,
+    'the collapsed row says what one tap will show');
+  assert(openDrawer(gesture).indexOf('Status · all zones') !== -1,
+    'the same tap gesture opens it');
+  assert(gesture._expanded === true, 'and sets the same _expanded flag as before');
+  assert(gesture.shadowRoot.innerHTML.indexOf('Hide status') !== -1, 'open row offers to hide');
+  openDrawer(gesture);
+  assert(gesture._expanded === false, 'tapping again closes it');
+  assert(gesture.shadowRoot.innerHTML.indexOf('Status · all zones') === -1,
+    'and Status goes back behind the toggle');
+
+  // The hint line names only what is actually inside — and with Status the only
+  // thing inside, the label already says so, so there is no sub-line at all.
+  assert(hintOf(body(gesture.shadowRoot.innerHTML)) === '',
+    'no sub-line repeating the label when Status is all there is');
+  const bothHint = await mountController({ weekly_volume_entity: WEEK4 }, week4Hass());
+  assert(hintOf(body(bothHint.shadowRoot.innerHTML)) ===
+    'Status · 3 programs · rain delay · run time',
+    'and lists everything when the controls are there');
+  assert(bothHint.shadowRoot.innerHTML.indexOf('Show programs &amp; settings') !== -1,
+    'the default label is unchanged');
+
+  // A controller with nothing to report renders no toggle at all. Every entity
+  // that backs a Status row is discovered from the registry, so this state is
+  // only reachable on a device that has none of them — assert the guard directly.
+  const guard = await mountController({ show_programs: false }, week4Hass());
+  assert(guard._drawer({ programs: [] }, [], false) === '',
+    'no toggle when neither Status nor the controls have anything in them');
+  assert(guard._drawer({ programs: [] }, [], true) !== '',
+    'but the controls alone are still enough to render one');
 
   // ── Summary ──────────────────────────────────────────────────────────────
   process.stdout.write('\n-----------------------------------------\n');

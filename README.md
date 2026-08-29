@@ -137,18 +137,21 @@ now live in the Status section, one tap away, and the collapsed card runs straig
 zone rows to the handle. Hub status is the exception — it is the one fact that explains
 every other stale value on the card, so it stays visible as the dot on the header icon.
 
-Because the Status section lives inside the drawer, `show_actions: false` and
-`show_programs: false` take it with them. The hub dot is unaffected by both.
+Neither `show_actions` nor `show_programs` can hide the Status section. Both are about
+controls — one hides Run/Stop, the other the programs list — and read-only device health is
+not a control. With either set to `false` the drawer keeps its toggle, the tap gesture is
+the same, and the section behind it is Status alone; the toggle row then reads **Show
+status** instead of **Show programs & settings**, since there are no settings left to
+offer. The hub dot is independent of both, as it is of the drawer itself.
 
-`show_actions: false` hides the Run/Stop buttons and the drawer, giving a read-only
-overview. The Auto/Off control stays.
+`show_actions: false` hides the Run/Stop buttons, the programs list, the rain delay row and
+the run time stepper, giving a read-only overview. The Auto/Off control stays, and so does
+Status.
 
-`show_programs: false` drops the drawer on its own — the merged program list, the rain
-delay row, the run time stepper, and the show/hide row that opens them — while leaving the
-Run/Stop buttons in place. Use it when the programs live on one dashboard card and you want
-the others to stay compact. The section is not rendered at all, not hidden with CSS, so
-there is nothing left to expand. Setting either option to `false` is enough to remove the
-drawer.
+`show_programs: false` drops the same block on its own while leaving the Run/Stop buttons
+in place. Use it when the programs live on one dashboard card and you want the others to
+stay compact. Nothing is hidden with CSS — the omitted rows are not rendered at all, so
+there is nothing left to expand into.
 
 ### The Off state
 
@@ -164,8 +167,8 @@ on the controller at once.
 |---|---|---|---|
 | `title` | string | device name | Header title |
 | `device_id` | string | first B-hyve device | From the device registry |
-| `show_actions` | bool | `true` | Run/Stop buttons and the drawer |
-| `show_programs` | bool | `true` | Set `false` to omit the whole programs & settings drawer, its show/hide row included |
+| `show_actions` | bool | `true` | Run/Stop buttons and the drawer controls. Never the Status section |
+| `show_programs` | bool | `true` | Set `false` to omit the programs list, rain delay and run time. Never the Status section |
 | `run_time` | number | `10` | Starting value for the run-time stepper |
 | `zones` | list | discovered | Explicit list of zone valve entities |
 | `device_mode_entity` | string | discovered | `select.*_device_mode` |
@@ -446,8 +449,9 @@ the weekly chip needs `weekly_volume_entity` set to a non-zero statistics helper
 **A Status row is missing** *(controller card)* — each row is omitted when the entity
 behind it does not resolve. Hub and Battery need `binary_sensor.*_connected` and
 `sensor.*_battery_level` on the device; Next run needs either `sensor.*_next_watering` or a
-zone with a future `next_start_time`; This week needs `weekly_volume_entity`. The whole
-section is gone if the drawer is — `show_actions: false` or `show_programs: false`.
+zone with a future `next_start_time`; This week needs `weekly_volume_entity`. Neither
+`show_actions: false` nor `show_programs: false` can remove the section — they hide
+controls, not device health.
 
 **Hub shows Offline unexpectedly** *(zone card)* — the chip reads that zone's own
 `binary_sensor.*_connected`. If the zone has no connectivity sensor of its own on a

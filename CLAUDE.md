@@ -56,7 +56,7 @@ node validate.test.js
 `validate.test.js` is headless: it stubs browser globals, `eval`s the card file, then
 mounts both cards against a fake device/entity registry. The DOM stub parses rendered
 tags, so tests dispatch real clicks at handles and exercise the actual event handlers.
-370 assertions across 29 groups cover the zone card's four states, chip order and each
+434 assertions across 30 groups cover the zone card's four states, chip order and each
 chip's visibility rule, the drawer toggle, the run-time stepper's fallback, the merged
 programs list with per-zone run times, station-order zone sorting, the device-Off state,
 omitted quick-action buttons, service-call payloads, flood sensors, the empty state, the
@@ -81,6 +81,12 @@ When asserting on rendered markup, strip the inline `<style>` block first (the t
   switch — an empty right column reads as controls that failed to load. Hub status is the
   one fact that stays visible with the drawer closed, as a 12 px `.hub-dot` on the header
   shape icon. Do not add a second dot for any other stat.
+- **`show_actions` and `show_programs` gate the drawer's controls block only.** They
+  never gate the Status section, which `_drawer()` renders on its own path — device
+  health is not a control, and hiding the programs list used to take it down with it.
+  The toggle row renders when either part has content, so Status stays one tap away
+  rather than always on screen; with the controls hidden its label becomes `Show status`.
+  Only an option written specifically for Status could hide it, and there is none.
 - **`weekly_volume_entity` on the controller card takes a string or a list.** A string is
   one device-level helper and is labelled "All zones combined". A list is summed, skipping
   helpers that do not report, and is labelled `N of M zones` when it covers fewer than the

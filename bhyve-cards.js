@@ -1331,8 +1331,9 @@
       }
 
       const showActions  = this._config.show_actions !== false;
-      // show_actions already suppressed the drawer as part of hiding every
-      // control; show_programs drops it on its own while leaving Run/Stop.
+      // Both options gate the drawer's controls block — programs, rain delay,
+      // run time. Neither touches the Status section: device health is not a
+      // control, and hiding the programs list was never meant to take it down.
       const showPrograms = this._config.show_programs !== false;
       const running     = zones.filter(z => this._isOn(z));
       const rainOn      = !!dev.rainDelay && this._isOn(dev.rainDelay);
@@ -1382,7 +1383,7 @@
             <span>${esc(faultText(this._hass, dev.fault, null) || 'A station reports a fault.')}</span></div>` : ''}
           ${this._toast ? `<div class="toast">${esc(this._toast)}</div>` : ''}
           <div class="zone-rows">${this._zoneRows(zones, showActions, off)}</div>
-          ${showActions && showPrograms ? this._drawer(dev, zones) : ''}
+          ${this._drawer(dev, zones, showActions && showPrograms)}
         </ha-card>`;
 
       this._bind(dev, zones);
@@ -1543,16 +1544,54 @@
       return rows;
     }
 
-    _drawer(dev, zones) {
+    // The drawer holds two independent things.
+    //
+    // The Status section is read-only device health. Nothing gates it: the
+    // "hub and device health are always reachable" rule outranks the two
+    // options, both of which are about controls — show_actions hides Run/Stop,
+    // show_programs hides the programs list. Hiding either used to take Status
+    // down with it, which is the bug this shape exists to prevent. Only a
+    // config option written specifically for Status could hide it, and there
+    // isn't one.
+    //
+    // The controls block below it — programs, rain delay, run time — is what
+    // those two options gate, exactly as before.
+    //
+    // The toggle row renders when either part has something in it, so the
+    // collapsed card stays as compact as it was and Status is still one tap
+    // away rather than always on screen.
+    _drawer(dev, zones, controls) {
       const status = this._statusRows(dev, zones);
+      if (!status.length && !controls) return '';
+
       const n      = (dev.programs || []).length;
-      const hint   = (status.length ? ['Status'] : [])
-        .concat([n + ' program' + (n === 1 ? '' : 's'), 'rain delay', 'run time'])
-        .join(' · ');
+      // With only Status inside, the label already names it and the sub-line
+      // would just say "Status" under "Show status".
+      const hint   = controls
+        ? (status.length ? ['Status'] : [])
+            .concat([n + ' program' + (n === 1 ? '' : 's'), 'rain delay', 'run time'])
+            .join(' · ')
+        : '';
+      // And the row would otherwise offer to show settings that are not there.
+      const label  = controls ? 'programs &amp; settings' : 'status';
       const open   = this._expanded;
 
       if (!open) {
-        return this._drawerBtn(hint, false);
+        return this._drawerBtn(hint, false, label);
+      }
+
+      const statusHtml = status.length ? `
+          <div class="drawer-title">
+            <b>Status · all zones</b>
+            <span>Read-only. One row per device-level fact — nothing here is
+            per zone.</span>
+          </div>
+          ${status.join('')}
+          ${controls ? '<div class="hr"></div>' : ''}` : '';
+
+      if (!controls) {
+        return this._drawerBtn(hint, true, label) +
+          `<div class="drawer">${statusHtml}</div>`;
       }
 
       const programs = (dev.programs || []).map(pid => {
@@ -1580,15 +1619,9 @@
 
       const minutes = this._presetMinutes(zones);
 
-      return this._drawerBtn(hint, true) + `
+      return this._drawerBtn(hint, true, label) + `
         <div class="drawer">
-          ${status.length ? `<div class="drawer-title">
-            <b>Status · all zones</b>
-            <span>Read-only. One row per device-level fact — nothing here is
-            per zone.</span>
-          </div>
-          ${status.join('')}
-          <div class="hr"></div>` : ''}
+          ${statusHtml}
           <div class="drawer-title">
             <b>Programs · all zones</b>
             <span>Every program on this controller, merged — programs are
@@ -1621,13 +1654,13 @@
         </div>`;
     }
 
-    _drawerBtn(hint, open) {
+    _drawerBtn(hint, open, label) {
       return `
         <button class="drawer-btn${open ? ' open' : ''}" data-act="drawer">
           <ha-icon icon="${ICON.tune}"></ha-icon>
           <span class="label">
-            <b>${open ? 'Hide' : 'Show'} programs &amp; settings</b>
-            <span>${esc(hint)}</span>
+            <b>${open ? 'Hide' : 'Show'} ${label || 'programs &amp; settings'}</b>
+            ${hint ? `<span>${esc(hint)}</span>` : ''}
           </span>
           <span class="chevron"><ha-icon icon="${open ? ICON.up : ICON.down}"></ha-icon></span>
         </button>`;

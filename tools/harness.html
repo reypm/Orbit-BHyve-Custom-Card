@@ -247,6 +247,10 @@ const RECIPES = {
     [{tag:CTRL,cfg:CTRL_CFG}]]},
   'controller-collapsed-dark': {theme:'dark', cols:[
     [{tag:CTRL,cfg:CTRL_CFG}]]},
+  // show_programs:false — the drawer keeps its toggle and holds Status alone.
+  'controller-status-only': {theme:'light', caps:true, cols:[
+    [{cap:'Collapsed',tag:CTRL,cfg:Object.assign({show_programs:false},CTRL_CFG)},
+     {cap:'Expanded',tag:CTRL,cfg:Object.assign({show_programs:false},CTRL_CFG),after:expand}]]},
   'zone-card-states': {theme:'light', caps:true, cols:[
     [{cap:'Idle',tag:ZN,cfg:{entity:'valve.garden_beds'}},
      {cap:'Fault',tag:ZN,cfg:{entity:'valve.side_strip'},mutate:faultOn}],
